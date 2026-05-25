@@ -57,9 +57,25 @@ func Plan(req Request) (*edit.Set, error) {
 		}
 	}
 
+	// Scan ALL project files for inline fully-qualified references
+	// like `com.foo.Bar` used without an import statement.
+	newFQN := strings.TrimSuffix(req.FQN, "."+target.Name) + "." + req.NewName
+	for _, fe := range req.Index.Files() {
+		if fe.Err != nil || fe.Symbols == nil {
+			continue
+		}
+		src, err := os.ReadFile(fe.Path)
+		if err != nil {
+			continue
+		}
+		tokens := java.Tokenize(src)
+		scanAndRenameFQN(fe.Path, tokens, req.FQN, req.NewName, fe.Symbols, set)
+	}
+
 	if set.Len() == 0 {
 		return nil, fmt.Errorf("no references to %s found", req.FQN)
 	}
+	_ = newFQN
 
 	// If the file is named after the old class, rename it to match.
 	oldBase := filepath.Base(target.File)
@@ -197,6 +213,54 @@ func isJavaModifier(s string) bool {
 		return true
 	}
 	return false
+}
+
+// scanAndRenameFQN finds inline fully-qualified references like
+// `com.foo.Bar` in code and renames the last segment.
+func scanAndRenameFQN(path string, tokens []java.Token, targetFQN, newName string, syms *java.FileSymbols, set *edit.Set) {
+	i := 0
+	for i < len(tokens) {
+		if tokens[i].Kind != java.TIdent {
+			i++
+			continue
+		}
+		chain, endIdx := buildDottedChain(tokens, i)
+		if chain == targetFQN && endIdx > i {
+			// Skip if this chain is inside an import or package declaration.
+			if inImportRange(tokens[i], syms) || inPackageRange(tokens[i], syms) {
+				i = endIdx
+				continue
+			}
+			lastTok := tokens[endIdx-1]
+			if lastTok.Kind == java.TIdent {
+				set.Add(edit.Edit{
+					File: path, Start: lastTok.Start, End: lastTok.End,
+					NewText: newName, Why: "rename inline FQN reference",
+				})
+			}
+			i = endIdx
+			continue
+		}
+		i++
+	}
+}
+
+func buildDottedChain(tokens []java.Token, start int) (string, int) {
+	if start >= len(tokens) || tokens[start].Kind != java.TIdent {
+		return "", start
+	}
+	result := tokens[start].Text
+	i := start + 1
+	for i+1 < len(tokens) {
+		if tokens[i].Kind == java.TPunct && tokens[i].Text == "." &&
+			tokens[i+1].Kind == java.TIdent {
+			result += "." + tokens[i+1].Text
+			i += 2
+			continue
+		}
+		break
+	}
+	return result, i
 }
 
 func rewriteImport(imp java.ImportSpec, targetFQN, targetPkg, newSimple string) (string, bool) {

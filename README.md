@@ -31,6 +31,7 @@ No C compiler needed. No cgo. Cross-compiles to any OS/arch Go supports.
 | Go | `.go` | `go.mod` | Module-path-based (`import "example.com/proj/pkg"`) |
 | TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | Directory walk (excludes `node_modules`, `dist`, `build`) | File-path-based (`import { Foo } from './foo'`) |
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | Directory walk (same as TypeScript) | File-path-based (ES modules only, no CommonJS `require()`) |
+| Rust | `.rs` | `Cargo.toml`, workspace `[workspace.members]` | Module-path-based (`use crate::foo::Bar`) |
 
 ---
 
@@ -81,17 +82,26 @@ refactorio rename in=src/utils.js name=greet to=sayHello
 refactorio rename in=src/Button.jsx name=Button to=Btn
 ```
 
+**Rust:**
+```bash
+refactorio rename in=src/foo.rs name=Bar to=Baz
+```
+
 **What gets renamed:**
 - The declaration in the source file
 - All usages in the same package/module
-- Import statements and bindings in importing files
-- Qualified references (`pkg.Symbol`, `Bar.method()`)
+- Import statements and bindings in importing files (`use`, `import`)
+- Qualified references (`pkg.Symbol`, `Bar.method()`, `crate::foo::Bar`)
+- Inline fully-qualified references (`com.foo.Bar x = ...` in Java/Kotlin)
 - Template literal / string template substitutions (`${name}`, `$name`)
+- `impl` blocks when renaming a Rust struct/enum/trait
+- Constructors when renaming a Java/Kotlin class
 - The file itself when it matches the old name (e.g. `Bar.java` → `Baz.java`)
 
 **What stays untouched:**
 - String literals (`"Bar"`)
 - Comments (`// Bar`)
+- Local variable declarations that share the symbol name (`let Bar = 1` won't be renamed)
 - Unrelated symbols with the same name in different scopes
 
 ---
@@ -105,8 +115,9 @@ refactorio move in=<file> to=<newPath> [root=<dir>] [dry-run=true]
 ```
 
 ```bash
-# Java — move class to a different package
+# Java — move class to a different package (directory or file path)
 refactorio move in=src/main/java/com/foo/Bar.java to=src/main/java/com/qux/Bar.java
+refactorio move in=src/main/java/com/foo/Bar.java to=src/main/java/com/qux/
 
 # Kotlin
 refactorio move in=src/main/kotlin/com/foo/Bar.kt to=src/main/kotlin/com/qux/Bar.kt
@@ -116,12 +127,18 @@ refactorio move in=pkg/foo.go to=lib/foo.go
 
 # TypeScript / JavaScript
 refactorio move in=src/utils/foo.ts to=src/lib/foo.ts
+
+# Rust
+refactorio move in=src/foo.rs to=src/bar.rs
 ```
 
 **What gets updated:**
-- **Java/Kotlin:** package declaration rewritten, imports in dependents updated, same-package files get explicit imports added
+- **Java/Kotlin:** package declaration rewritten, imports in dependents updated, same-package files that use the class get explicit imports added, inline fully-qualified references (`com.foo.Bar`) rewritten
 - **Go:** package declaration updated to match new directory, import paths rewritten in all importing files
 - **TS/JS:** import paths rewritten in all importing files, relative imports inside the moved file recalculated
+- **Rust:** `use` paths rewritten across the crate
+
+Note: `to=` can be a directory — the source filename is appended automatically.
 
 ---
 
@@ -138,11 +155,13 @@ refactorio delete in=src/main/java/com/foo/Bar.java
 refactorio delete in=src/main/kotlin/com/foo/Bar.kt
 refactorio delete in=pkg/foo.go
 refactorio delete in=src/foo.ts
+refactorio delete in=src/foo.rs
 ```
 
 **What gets done:**
 - The file is deleted from disk
-- Import statements referencing the file/class are removed from all dependents
+- Import statements referencing the file/class are removed from all dependents (`import`, `use`)
+- `mod` declarations removed (Rust)
 - A warning lists files that still contain code references (manual cleanup needed)
 - Wildcard imports are NOT removed (they cover the whole package)
 
@@ -171,7 +190,7 @@ refactorio rename-package from=example.com/proj/pkg to=example.com/proj/lib
 - Wildcard imports updated
 - Sub-packages are NOT renamed (only the exact package)
 
-Note: TypeScript/JavaScript does not have packages — use `move` to relocate individual files.
+Note: TypeScript/JavaScript and Rust do not have a package-rename equivalent — use `move` to relocate individual files, or rename the module in Rust's `mod` declarations manually.
 
 ---
 
@@ -229,12 +248,15 @@ $ refactorio rename in=pkg/foo.go name=Hello to=Greet dry-run=true
 
 | What works | What doesn't |
 |---|---|
-| Class/method/field/variable rename across project | No overload disambiguation — renames ALL methods with that name |
-| Constructor rename when class is renamed | No inheritance tracking — overrides in subclasses not found |
-| Import rewriting (explicit, static, wildcard) | Generic/array/qualified types not recognized by type scanner |
-| Move class across packages | Reflection (`Class.forName(...)`) and annotation strings not detected |
-| Delete class + import cleanup | Non-standard Gradle source roots not detected |
-| Rename entire package | Programmatic Gradle includes invisible |
+| Class rename (position-aware, skips local vars with same name) | No overload disambiguation — renames ALL methods with that name |
+| Method rename with receiver-type tracking (HIGH/MEDIUM confidence) | No inheritance tracking — overrides in subclasses not found |
+| Field rename with shadow detection (skips shadowed bare references) | Generic/array/qualified types not recognized by type scanner |
+| Constructor rename when class is renamed | Reflection (`Class.forName(...)`) and annotation strings not detected |
+| Inline FQN references (`com.foo.Bar x`) renamed/rewritten on move | Non-standard Gradle source roots not detected |
+| Import rewriting (explicit, static, wildcard) | Programmatic Gradle includes invisible |
+| Move class across packages (same-package files get imports added) | |
+| Delete class + import cleanup | |
+| Rename entire package | |
 | Multi-module Gradle and Maven projects | |
 | Strings, comments, text blocks correctly excluded | |
 
@@ -277,12 +299,27 @@ $ refactorio rename in=pkg/foo.go name=Hello to=Greet dry-run=true
 | JSX/TSX component renames | |
 | Mixed JS/TS projects (`.js` importing `.ts`) | |
 
+### Rust
+
+| What works | What doesn't |
+|---|---|
+| struct/enum/trait/fn/type/const/static rename across crate | No cross-crate renaming (workspace crates indexed independently) |
+| `impl` blocks renamed with their type | Macro-generated identifiers invisible |
+| `use` paths rewritten (simple, grouped `use std::{io, fs}`, aliased, glob) | Proc macro attribute arguments not scanned |
+| Move file + `use` path rewriting | `mod.rs` ↔ `foo.rs` edition duality not auto-detected |
+| Delete file + `use`/`mod` cleanup | Trait method implementations in other types not tracked |
+| Nested block comments handled correctly | |
+| Raw strings `r#"..."#` correctly excluded | |
+| Lifetime `'a` vs char `'x'` correctly distinguished | |
+| Local variable declarations (`let Foo = 1`) not wrongly renamed | |
+
 ### Cross-Language Limitations (all languages)
 
-- **No type system.** Renaming is name-based, not type-based. A variable and a class with the same name in the same file will both be renamed.
-- **No semantic analysis.** The tool cannot tell whether `x.foo()` calls `Bar.foo` or `Baz.foo` without tracking `x`'s type.
+- **Position-aware but not type-aware.** Local variable declarations sharing a symbol name are skipped (`let Foo = 1`, `String Foo = "x"`, `val Foo`, `Foo := 1`). But two types with the same name in different scopes may still collide without type resolution.
+- **No semantic analysis.** The tool cannot tell whether `x.foo()` calls `Bar.foo` or `Baz.foo` without tracking `x`'s type. Java method/field renames use receiver-type tracking for common cases.
 - **No cross-language refactoring.** Renaming a Java class does not update Kotlin files that import it (and vice versa). Each language is indexed independently.
 - **Strings and comments are never modified.** This is by design. Template literal substitutions (`${name}`, `$name`) ARE modified because they ARE code references.
+- **Inline FQN references are handled for Java/Kotlin.** `com.foo.Bar x = ...` is detected and rewritten during both rename and move operations.
 
 ---
 
@@ -295,6 +332,8 @@ $ refactorio rename in=pkg/foo.go name=Hello to=Greet dry-run=true
 **Go modules** — reads `go.mod` for the module path. All `.go` files under the module root are indexed (excluding `vendor`, `testdata`).
 
 **npm/yarn** — walks the directory tree for `.ts`/`.js` files, excluding `node_modules`, `dist`, `build`, `.git`, `.next`, `coverage`.
+
+**Cargo** — reads `Cargo.toml` for the crate name. All `.rs` files under `src/` are indexed (excluding `target/`). Module paths computed from filesystem layout (`src/foo.rs` → `crate::foo`, `src/foo/mod.rs` → `crate::foo`).
 
 ---
 
@@ -321,13 +360,16 @@ internal/edit/                     Edit/Move/Delete sets, atomic apply, dry-run
 internal/project/                  Java/Kotlin project detection (Gradle/Maven)
 internal/index/                    Java project-wide symbol index
 internal/lang/
+  common/                          Shared Range + TokenKind types
   java/                            Java lexer + symbol extractor
   kotlin/                          Kotlin lexer + symbol extractor
   golang/                          Go lexer + symbol extractor + index
   typescript/                      TS/JS lexer + symbol extractor + index
+  rust/                            Rust lexer + symbol extractor + index
+internal/history/                  Undo/rollback history (~/.refactorio/history/)
 internal/op/
-  unified/                         Unified rename/move/delete/rename-package dispatcher
-  renameclass/                     Java class rename logic
+  unified/                         Unified rename/move/delete dispatcher + FQN scanner
+  renameclass/                     Java class rename logic (position-aware)
   renamemethod/                    Java method rename logic (receiver-typed)
   renamefield/                     Java field rename logic (shadow-aware)
   moveclass/                       Java move class logic
@@ -336,6 +378,7 @@ internal/op/
   ktrename/                        Kotlin rename/move/delete logic
   gorename/                        Go rename/move/delete/rename-package logic
   tsrename/                        TS/JS rename/move/delete logic
+  rstrename/                       Rust rename/move/delete logic
 ```
 
 ## Running Tests
@@ -344,7 +387,7 @@ internal/op/
 go test ./...
 ```
 
-~140 tests across 19 packages. No external tools or services required.
+~170 tests across 22 packages. No external tools or services required.
 
 ## License
 

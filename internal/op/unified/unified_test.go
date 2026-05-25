@@ -88,6 +88,51 @@ public class User { Bar b; }
 	}
 }
 
+// Same-package files that use a class without an import must get an
+// explicit import added when the class is moved out of the package.
+func TestUnifiedMove_Java_SamePackageGetsImport(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/test/A.java": `package com.test;
+public class A { public int value; }
+`,
+		"src/main/java/com/test/B.java": `package com.test;
+public class B { A a = new A(); }
+`,
+		"src/main/java/com/test/C.java": `package com.test;
+public class C { A a; }
+`,
+		"src/main/java/com/test/Unrelated.java": `package com.test;
+public class Unrelated { int x; }
+`,
+	})
+	from := filepath.Join(root, "src/main/java/com/test/A.java")
+	to := filepath.Join(root, "src/main/java/com/other/A.java")
+	set, err := Move(from, to, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	// B.java uses A — should now have an import.
+	b := read(t, filepath.Join(root, "src/main/java/com/test/B.java"))
+	if !strings.Contains(b, "import com.other.A;") {
+		t.Errorf("B.java missing import for moved A:\n%s", b)
+	}
+	// C.java uses A — should now have an import.
+	c := read(t, filepath.Join(root, "src/main/java/com/test/C.java"))
+	if !strings.Contains(c, "import com.other.A;") {
+		t.Errorf("C.java missing import for moved A:\n%s", c)
+	}
+	// Unrelated.java does NOT use A — should NOT get an import.
+	u := read(t, filepath.Join(root, "src/main/java/com/test/Unrelated.java"))
+	if strings.Contains(u, "import") {
+		t.Errorf("Unrelated.java should not have an import:\n%s", u)
+	}
+}
+
 func TestUnifiedDelete_Java(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -297,6 +342,69 @@ public class Other {
 }
 
 // Renaming a symbol that doesn't exist as a declaration should error.
+// Regression: inline fully-qualified references like
+// `com.foo.Field x = new com.foo.Field()` must be renamed too.
+func TestUnifiedRename_Java_InlineFQN(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/foo/Field.java": `package com.foo;
+public class Field { public int value; }
+`,
+		"src/main/java/com/bar/User.java": `package com.bar;
+public class User {
+    com.foo.Field f = new com.foo.Field();
+}
+`,
+	})
+	file := filepath.Join(root, "src/main/java/com/foo/Field.java")
+	set, err := Rename(file, "Field", "Column", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	user := read(t, filepath.Join(root, "src/main/java/com/bar/User.java"))
+	if strings.Contains(user, "com.foo.Field") {
+		t.Errorf("inline FQN not renamed:\n%s", user)
+	}
+	if !strings.Contains(user, "com.foo.Column") {
+		t.Errorf("expected com.foo.Column:\n%s", user)
+	}
+}
+
+func TestUnifiedMove_Java_InlineFQN(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/foo/Field.java": `package com.foo;
+public class Field {}
+`,
+		"src/main/java/com/bar/User.java": `package com.bar;
+public class User {
+    com.foo.Field f;
+}
+`,
+	})
+	from := filepath.Join(root, "src/main/java/com/foo/Field.java")
+	to := filepath.Join(root, "src/main/java/com/qux/Field.java")
+	set, err := Move(from, to, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	user := read(t, filepath.Join(root, "src/main/java/com/bar/User.java"))
+	if strings.Contains(user, "com.foo.Field") {
+		t.Errorf("inline FQN not rewritten:\n%s", user)
+	}
+	if !strings.Contains(user, "com.qux.Field") {
+		t.Errorf("expected com.qux.Field:\n%s", user)
+	}
+}
+
 func TestUnifiedRename_Java_UnknownSymbolErrors(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{

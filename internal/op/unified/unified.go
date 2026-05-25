@@ -257,6 +257,27 @@ func moveJava(file, toFile, root string) (*edit.Set, error) {
 			}
 		}
 	}
+	// Scan ALL project files for inline FQN references (used without
+	// an import, e.g. `com.foo.Bar x = ...`). Rewrite the full chain.
+	for _, td := range fe.Symbols.Types {
+		oldFQN := td.Name
+		if fe.Symbols.Package != "" {
+			oldFQN = fe.Symbols.Package + "." + td.Name
+		}
+		newFQN := newPkg + "." + td.Name
+		for _, entry := range idx.Files() {
+			if entry.Err != nil || entry.Symbols == nil || entry.Path == file {
+				continue
+			}
+			src, err := os.ReadFile(entry.Path)
+			if err != nil {
+				continue
+			}
+			tokens := java.Tokenize(src)
+			moveFQNReferences(entry.Path, tokens, oldFQN, newFQN, entry, set)
+		}
+	}
+
 	set.AddMove(edit.Move{From: file, To: toFile, Why: "move file"})
 	return set, nil
 }
@@ -575,6 +596,21 @@ func renameByToken(file, name, newName, fqn string, idx *index.Index, p *project
 				NewText: newName, Why: fmt.Sprintf("rename %s -> %s", name, newName),
 			})
 		}
+	}
+
+	// Scan ALL project files for inline fully-qualified references
+	// like `com.foo.Bar` used without an import. These don't show up
+	// in FilesImporting() because there's no import statement.
+	for _, fe := range idx.Files() {
+		if fe.Err != nil || fe.Symbols == nil {
+			continue
+		}
+		src, err := os.ReadFile(fe.Path)
+		if err != nil {
+			continue
+		}
+		tokens := java.Tokenize(src)
+		renameFQNReferences(fe.Path, tokens, fqn, newName, fe, set)
 	}
 
 	// Rename the file if it matches the old name.
