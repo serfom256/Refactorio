@@ -1,0 +1,18 @@
+# Binary
+refactorio
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+todo.txt
+
+# Claude
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
