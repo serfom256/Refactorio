@@ -62,8 +62,10 @@ func Rename(inFile, name, newName, root string) (*edit.Set, error) {
 	return nil, fmt.Errorf("unsupported file type: %s", filepath.Ext(inFile))
 }
 
-// Move moves a file and updates all imports.
-func Move(inFile, toPath, root string) (*edit.Set, error) {
+// Move moves a file and updates all imports. The returned warnings
+// flag situations the move cannot safely handle (e.g. Java package-
+// private access that breaks when crossing a package boundary).
+func Move(inFile, toPath, root string) (*edit.Set, []string, error) {
 	inFile, _ = filepath.Abs(inFile)
 	toPath, _ = filepath.Abs(toPath)
 	// If destination is a directory, append the source filename.
@@ -78,27 +80,31 @@ func Move(inFile, toPath, root string) (*edit.Set, error) {
 	case "java":
 		return moveJava(inFile, toPath, root)
 	case "kotlin":
-		return moveKotlin(inFile, toPath, root)
+		set, err := moveKotlin(inFile, toPath, root)
+		return set, nil, err
 	case "go":
 		idx, err := goIndex(root)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return gorename.PlanMove(gorename.MoveRequest{File: inFile, NewPath: toPath, Index: idx})
+		set, err := gorename.PlanMove(gorename.MoveRequest{File: inFile, NewPath: toPath, Index: idx})
+		return set, nil, err
 	case "ts":
 		idx, err := tsIndex(root)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return tsrename.PlanMove(tsrename.MoveRequest{File: inFile, NewPath: toPath, Index: idx})
+		set, err := tsrename.PlanMove(tsrename.MoveRequest{File: inFile, NewPath: toPath, Index: idx})
+		return set, nil, err
 	case "rust":
 		idx, err := rustIndex(root)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return rstrename.PlanMove(rstrename.MoveRequest{File: inFile, NewPath: toPath, Index: idx})
+		set, err := rstrename.PlanMove(rstrename.MoveRequest{File: inFile, NewPath: toPath, Index: idx})
+		return set, nil, err
 	}
-	return nil, fmt.Errorf("unsupported file type: %s", filepath.Ext(inFile))
+	return nil, nil, fmt.Errorf("unsupported file type: %s", filepath.Ext(inFile))
 }
 
 // Delete removes a file and cleans imports. Returns the edit set and
@@ -193,7 +199,7 @@ func renameJava(file, name, newName, root string) (*edit.Set, error) {
 	return nil, fmt.Errorf("symbol %q not found in %s", name, file)
 }
 
-func moveJava(file, toFile, root string) (*edit.Set, error) {
+func moveJava(file, toFile, root string) (*edit.Set, []string, error) {
 	// If destination is a directory, append the source filename.
 	if info, err := os.Stat(toFile); err == nil && info.IsDir() {
 		toFile = filepath.Join(toFile, filepath.Base(file))
@@ -203,18 +209,19 @@ func moveJava(file, toFile, root string) (*edit.Set, error) {
 
 	p, idx, err := javaIndex(root, file)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fe := idx.File(file)
 	if fe == nil || fe.Symbols == nil {
-		return nil, fmt.Errorf("file %s not indexed", file)
+		return nil, nil, fmt.Errorf("file %s not indexed", file)
 	}
 	newPkg := packageFromPath(toFile, p)
 	if newPkg == fe.Symbols.Package {
 		set := edit.NewSet()
 		set.AddMove(edit.Move{From: file, To: toFile, Why: "move file"})
-		return set, nil
+		return set, nil, nil
 	}
+	warnings := detectAccessWarnings(file, fe, idx)
 	set := edit.NewSet()
 	if fe.Symbols.PackageRange.End > 0 {
 		set.Add(edit.Edit{
@@ -279,7 +286,81 @@ func moveJava(file, toFile, root string) (*edit.Set, error) {
 	}
 
 	set.AddMove(edit.Move{From: file, To: toFile, Why: "move file"})
-	return set, nil
+	return set, warnings, nil
+}
+
+// detectAccessWarnings flags Java package-private access that will
+// break when the file moves to a different package. Type-level only:
+//
+//   1. The moved file references a package-private type in its old
+//      package — that type won't be importable from the new package.
+//   2. The moved type itself is package-private and has dependents —
+//      it must become public to be imported after the move.
+func detectAccessWarnings(file string, fe *index.FileEntry, idx *index.Index) []string {
+	var warnings []string
+	oldPkg := fe.Symbols.Package
+
+	// Collect package-private type names declared in the old package
+	// (excluding the moved file's own types).
+	movedNames := map[string]bool{}
+	for _, td := range fe.Symbols.Types {
+		movedNames[td.Name] = true
+	}
+	pkgPrivateTypes := map[string]bool{}
+	for _, entry := range idx.Files() {
+		if entry.Symbols == nil || entry.Path == file || entry.Symbols.Package != oldPkg {
+			continue
+		}
+		for _, td := range entry.Symbols.Types {
+			if !td.IsPublic && !movedNames[td.Name] {
+				pkgPrivateTypes[td.Name] = true
+			}
+		}
+	}
+
+	// Case 1: moved file uses any of those package-private types.
+	if len(pkgPrivateTypes) > 0 {
+		src, err := os.ReadFile(file)
+		if err == nil {
+			used := map[string]bool{}
+			for _, tok := range java.Tokenize(src) {
+				if tok.Kind == java.TIdent && pkgPrivateTypes[tok.Text] {
+					used[tok.Text] = true
+				}
+			}
+			for name := range used {
+				warnings = append(warnings, fmt.Sprintf(
+					"%s is package-private in %s and will not be importable after the move; make it public or keep them in the same package",
+					name, oldPkg))
+			}
+		}
+	}
+
+	// Case 2: the moved type is package-private and has dependents.
+	for _, td := range fe.Symbols.Types {
+		if td.IsPublic {
+			continue
+		}
+		fqn := td.Name
+		if oldPkg != "" {
+			fqn = oldPkg + "." + td.Name
+		}
+		deps := idx.FilesImporting(fqn)
+		hasDep := false
+		for _, d := range deps {
+			if d != file {
+				hasDep = true
+				break
+			}
+		}
+		if hasDep {
+			warnings = append(warnings, fmt.Sprintf(
+				"%s is package-private but is referenced elsewhere; it must be made public to be imported after the move",
+				td.Name))
+		}
+	}
+
+	return warnings
 }
 
 // fileUsesIdentifier scans a Java file for any identifier token

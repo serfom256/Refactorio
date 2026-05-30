@@ -71,7 +71,7 @@ public class User { Bar b; }
 	})
 	from := filepath.Join(root, "src/main/java/com/foo/Bar.java")
 	to := filepath.Join(root, "src/main/java/com/qux/Bar.java")
-	set, err := Move(from, to, root)
+	set, _, err := Move(from, to, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ public class Unrelated { int x; }
 	})
 	from := filepath.Join(root, "src/main/java/com/test/A.java")
 	to := filepath.Join(root, "src/main/java/com/other/A.java")
-	set, err := Move(from, to, root)
+	set, _, err := Move(from, to, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,6 +130,62 @@ public class Unrelated { int x; }
 	u := read(t, filepath.Join(root, "src/main/java/com/test/Unrelated.java"))
 	if strings.Contains(u, "import") {
 		t.Errorf("Unrelated.java should not have an import:\n%s", u)
+	}
+}
+
+// Moving a class that uses a package-private sibling must warn that
+// the sibling won't be importable from the new package.
+func TestUnifiedMove_Java_PackagePrivateWarning(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/test/A.java": `package com.test;
+public class A {
+    Helper h = new Helper();
+}
+`,
+		// Helper is package-private (no `public`).
+		"src/main/java/com/test/Helper.java": `package com.test;
+class Helper {}
+`,
+	})
+	from := filepath.Join(root, "src/main/java/com/test/A.java")
+	to := filepath.Join(root, "src/main/java/com/other/A.java")
+	_, warnings, err := Move(from, to, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "Helper") && strings.Contains(w, "package-private") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected package-private warning for Helper, got: %v", warnings)
+	}
+}
+
+// Moving a class that only uses PUBLIC siblings produces no warning.
+func TestUnifiedMove_Java_NoWarningForPublic(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/test/A.java": `package com.test;
+public class A { Helper h; }
+`,
+		"src/main/java/com/test/Helper.java": `package com.test;
+public class Helper {}
+`,
+	})
+	from := filepath.Join(root, "src/main/java/com/test/A.java")
+	to := filepath.Join(root, "src/main/java/com/other/A.java")
+	_, warnings, err := Move(from, to, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings, got: %v", warnings)
 	}
 }
 
@@ -187,7 +243,7 @@ func TestUnifiedMove_TS(t *testing.T) {
 	})
 	from := filepath.Join(root, "src/utils/foo.ts")
 	to := filepath.Join(root, "src/lib/foo.ts")
-	set, err := Move(from, to, root)
+	set, _, err := Move(from, to, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +307,7 @@ func TestUnifiedMove_Go(t *testing.T) {
 	})
 	from := filepath.Join(root, "pkg/foo.go")
 	to := filepath.Join(root, "lib/foo.go")
-	set, err := Move(from, to, root)
+	set, _, err := Move(from, to, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +445,7 @@ public class User {
 	})
 	from := filepath.Join(root, "src/main/java/com/foo/Field.java")
 	to := filepath.Join(root, "src/main/java/com/qux/Field.java")
-	set, err := Move(from, to, root)
+	set, _, err := Move(from, to, root)
 	if err != nil {
 		t.Fatal(err)
 	}

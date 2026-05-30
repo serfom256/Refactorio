@@ -32,6 +32,9 @@ type TypeDecl struct {
 	Methods   []MemberDecl
 	Fields    []MemberDecl
 	Nested    []TypeDecl
+	// IsPublic is true if the type has the `public` modifier. A
+	// top-level type without it is package-private.
+	IsPublic bool
 }
 
 type MemberDecl struct {
@@ -71,6 +74,7 @@ func (p *symParser) skipComments() {
 
 func (p *symParser) parse() *FileSymbols {
 	fs := &FileSymbols{}
+	pendingPublic := false
 	for p.pos < len(p.tokens) {
 		p.skipComments()
 		if p.pos >= len(p.tokens) {
@@ -79,20 +83,43 @@ func (p *symParser) parse() *FileSymbols {
 		tok := p.at()
 		if tok.Kind == TIdent && tok.Text == "package" {
 			fs.Package, fs.PackageRange = p.parsePackage()
+			pendingPublic = false
 			continue
 		}
 		if tok.Kind == TIdent && tok.Text == "import" {
 			if imp, ok := p.parseImport(); ok {
 				fs.Imports = append(fs.Imports, imp)
 			}
+			pendingPublic = false
+			continue
+		}
+		// Track the `public` modifier preceding a top-level type.
+		if tok.Kind == TIdent && tok.Text == "public" {
+			pendingPublic = true
+			p.skip()
+			continue
+		}
+		// Other modifiers don't change visibility; skip without resetting.
+		if tok.Kind == TIdent && isModifier(tok.Text) {
+			p.skip()
+			continue
+		}
+		// Annotations precede/interleave with modifiers; skip without
+		// resetting the pending visibility.
+		if tok.Kind == TPunct && tok.Text == "@" {
+			p.skip()
+			p.skipAnnotation()
 			continue
 		}
 		if p.atTypeKeyword() {
 			if td, ok := p.parseType(); ok {
+				td.IsPublic = pendingPublic
 				fs.Types = append(fs.Types, td)
 			}
+			pendingPublic = false
 			continue
 		}
+		pendingPublic = false
 		p.skip()
 	}
 	return fs
