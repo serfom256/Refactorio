@@ -3,6 +3,7 @@ package unified
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/serfom256/refactorio/internal/cli"
@@ -121,27 +122,35 @@ use 'move' for individual files.`,
 	cli.RegisterCommand(cli.Command{
 		Name:    "rollback",
 		Handler: HandleRollback,
-		Summary: "undo the last refactoring operation",
-		Usage:   "rollback",
-		Help: `Restores the files changed by the most recent operation. History
-holds the last 10 operations in ~/.refactorio/history/. Reverses moves
-and restores deleted files. Run 'refactorio history' to see the stack.`,
+		Summary: "undo the last refactoring operation for the current project",
+		Usage:   "rollback [root=<dir>]",
+		Help: `Restores the files changed by the most recent operation. History is
+per-project, stored under ~/.refactorio/projects/<hash>/history/ and keyed by
+the absolute path of the project root. The project root is detected by walking
+up from the working directory (or 'root=<dir>') looking for go.mod / Cargo.toml
+/ settings.gradle / pom.xml / package.json / tsconfig.json. The stack holds
+the last 10 operations. Reverses moves and restores deleted files.
+
+Run 'refactorio history' to see the stack.`,
 	})
 
 	cli.RegisterCommand(cli.Command{
 		Name:    "history",
 		Handler: HandleHistory,
-		Summary: "list recent refactoring operations",
-		Usage:   "history",
-		Help:    `Lists the operations stored in ~/.refactorio/history/ (newest last).`,
+		Summary: "list recent refactoring operations for the current project",
+		Usage:   "history [root=<dir>]",
+		Help: `Lists the operations stored for the current project (newest last).
+The project is identified by the absolute path of its root (auto-detected from
+the working directory or 'root=<dir>').`,
 	})
 }
 
 // applyWithHistory snapshots the edit set, applies it, then saves
-// the snapshot to ~/.refactorio/history/ for rollback.
+// the snapshot under the project-scoped history directory.
 func applyWithHistory(set *edit.Set, args *cli.Args, stdout io.Writer) error {
 	command := rebuildCommand(args)
-	cs, err := history.Snapshot(set, command)
+	projectRoot := resolveProjectRoot(args)
+	cs, err := history.Snapshot(set, command, projectRoot)
 	if err != nil {
 		return fmt.Errorf("snapshot: %w", err)
 	}
@@ -154,12 +163,28 @@ func applyWithHistory(set *edit.Set, args *cli.Args, stdout io.Writer) error {
 	return nil
 }
 
+// resolveProjectRoot uses the `root=` arg if present, otherwise the
+// working directory, then walks up for a project marker.
+func resolveProjectRoot(args *cli.Args) string {
+	start, _ := args.Get("root")
+	if start == "" {
+		start, _ = os.Getwd()
+	}
+	return history.FindProjectRoot(start)
+}
+
 func rebuildCommand(args *cli.Args) string {
 	return args.Subcommand + " " + strings.Join(args.RawPairs(), " ")
 }
 
 func HandleRollback(args *cli.Args, stdout, stderr io.Writer) error {
-	desc, err := history.Rollback()
+	rootArg, _ := args.Get("root")
+	if unknown := args.Unknown("root"); len(unknown) > 0 {
+		return fmt.Errorf("unknown arguments: %v", unknown)
+	}
+	_ = rootArg
+	projectRoot := resolveProjectRoot(args)
+	desc, err := history.Rollback(projectRoot)
 	if err != nil {
 		return err
 	}
@@ -168,10 +193,15 @@ func HandleRollback(args *cli.Args, stdout, stderr io.Writer) error {
 }
 
 func HandleHistory(args *cli.Args, stdout, stderr io.Writer) error {
-	entries, err := history.List()
+	if unknown := args.Unknown("root"); len(unknown) > 0 {
+		return fmt.Errorf("unknown arguments: %v", unknown)
+	}
+	projectRoot := resolveProjectRoot(args)
+	entries, err := history.List(projectRoot)
 	if err != nil {
 		return err
 	}
+	fmt.Fprintf(stdout, "project: %s\n", projectRoot)
 	if len(entries) == 0 {
 		fmt.Fprintln(stdout, "no history")
 		return nil

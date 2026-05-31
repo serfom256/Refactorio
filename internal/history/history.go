@@ -1,11 +1,20 @@
-// Package history provides undo support by snapshotting file contents
-// before each refactoring operation. Snapshots are stored in
-// ~/.refactorio/history/ as gob-encoded files. The stack holds at most
-// MaxEntries changesets; oldest are pruned on save.
+// Package history provides per-project undo support by snapshotting
+// file contents before each refactoring operation.
+//
+// Layout:
+//
+//	~/.refactorio/projects/<hash>/history/0001.gob   ... 0010.gob
+//	~/.refactorio/projects/<hash>/path.txt           absolute project root, for display
+//
+// <hash> is the first 12 hex chars of SHA-256 of the absolute project
+// root path. Each project's stack holds at most MaxEntries entries;
+// oldest are pruned on save.
 package history
 
 import (
+	"crypto/sha256"
 	"encoding/gob"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,12 +30,13 @@ const MaxEntries = 10
 
 // Changeset is the undo record for one refactoring operation.
 type Changeset struct {
-	ID        int
-	Timestamp time.Time
-	Command   string              // the subcommand + args for display
-	Originals map[string][]byte   // abs path → original file content
-	Moves     []edit.Move         // applied moves (rollback reverses them)
-	Deletes   []DeletedFile       // files that were deleted (rollback recreates them)
+	ID          int
+	Timestamp   time.Time
+	Command     string
+	ProjectRoot string
+	Originals   map[string][]byte
+	Moves       []edit.Move
+	Deletes     []DeletedFile
 }
 
 type DeletedFile struct {
@@ -34,68 +44,102 @@ type DeletedFile struct {
 	Content []byte
 }
 
-// histDir returns ~/.refactorio/history/, creating it if needed.
-func histDir() (string, error) {
+// FindProjectRoot walks up from start looking for a project marker
+// (go.mod, Cargo.toml, gradle/maven files, package.json). Returns the
+// nearest ancestor with such a marker, or start (as an absolute path)
+// if none is found.
+func FindProjectRoot(start string) string {
+	abs, err := filepath.Abs(start)
+	if err != nil {
+		return start
+	}
+	info, err := os.Stat(abs)
+	if err == nil && !info.IsDir() {
+		abs = filepath.Dir(abs)
+	}
+	markers := []string{
+		"go.mod", "Cargo.toml",
+		"settings.gradle", "settings.gradle.kts",
+		"pom.xml",
+		"build.gradle", "build.gradle.kts",
+		"package.json", "tsconfig.json",
+	}
+	dir := abs
+	for {
+		for _, m := range markers {
+			if _, err := os.Stat(filepath.Join(dir, m)); err == nil {
+				return dir
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return abs
+		}
+		dir = parent
+	}
+}
+
+// projectDir returns ~/.refactorio/projects/<hash>/, creating the
+// directory and recording the path marker file on first use.
+func projectDir(projectRoot string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".refactorio", "history")
+	h := sha256.Sum256([]byte(projectRoot))
+	hash := hex.EncodeToString(h[:])[:12]
+	dir := filepath.Join(home, ".refactorio", "projects", hash, "history")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
+	}
+	// Write the path marker (overwrite-safe).
+	pathFile := filepath.Join(filepath.Dir(dir), "path.txt")
+	if _, err := os.Stat(pathFile); err != nil {
+		_ = os.WriteFile(pathFile, []byte(projectRoot+"\n"), 0o644)
 	}
 	return dir, nil
 }
 
-// Snapshot captures the current state of all files that will be
-// affected by the edit set. Call this BEFORE set.Apply().
-func Snapshot(set *edit.Set, command string) (*Changeset, error) {
+// Snapshot captures original contents of files affected by the edit
+// set. projectRoot is recorded for display and used to scope storage.
+// Call BEFORE set.Apply().
+func Snapshot(set *edit.Set, command, projectRoot string) (*Changeset, error) {
 	cs := &Changeset{
-		Timestamp: time.Now(),
-		Command:   command,
-		Originals: map[string][]byte{},
+		Timestamp:   time.Now(),
+		Command:     command,
+		ProjectRoot: projectRoot,
+		Originals:   map[string][]byte{},
 	}
-
-	// Capture original content of edited files.
 	for _, f := range set.Files() {
 		src, err := os.ReadFile(f)
 		if err != nil {
-			continue // file might not exist yet (insertion)
+			continue
 		}
 		cs.Originals[f] = src
 	}
-
-	// Capture files that will be moved (we need the source content).
 	for _, m := range set.Moves() {
 		if _, ok := cs.Originals[m.From]; !ok {
-			src, err := os.ReadFile(m.From)
-			if err == nil {
+			if src, err := os.ReadFile(m.From); err == nil {
 				cs.Originals[m.From] = src
 			}
 		}
 		cs.Moves = append(cs.Moves, m)
 	}
-
-	// Capture files that will be deleted.
 	for _, d := range set.Deletes() {
-		src, err := os.ReadFile(d.Path)
-		if err == nil {
+		if src, err := os.ReadFile(d.Path); err == nil {
 			cs.Deletes = append(cs.Deletes, DeletedFile{Path: d.Path, Content: src})
 		}
 	}
-
 	return cs, nil
 }
 
-// Save writes a changeset to ~/.refactorio/history/ and prunes old
-// entries beyond MaxEntries.
+// Save writes a changeset under the project's history directory and
+// prunes entries beyond MaxEntries.
 func Save(cs *Changeset) error {
-	dir, err := histDir()
+	dir, err := projectDir(cs.ProjectRoot)
 	if err != nil {
 		return err
 	}
-
-	// Assign next ID.
 	entries, _ := listEntries(dir)
 	nextID := 1
 	if len(entries) > 0 {
@@ -103,7 +147,6 @@ func Save(cs *Changeset) error {
 	}
 	cs.ID = nextID
 
-	// Write.
 	path := filepath.Join(dir, fmt.Sprintf("%04d.gob", cs.ID))
 	f, err := os.Create(path)
 	if err != nil {
@@ -114,7 +157,6 @@ func Save(cs *Changeset) error {
 		return err
 	}
 
-	// Prune old entries.
 	entries = append(entries, nextID)
 	if len(entries) > MaxEntries {
 		for _, old := range entries[:len(entries)-MaxEntries] {
@@ -124,18 +166,16 @@ func Save(cs *Changeset) error {
 	return nil
 }
 
-// Rollback restores the most recent changeset. Returns the changeset
-// description for display. Returns an error if no history exists.
-func Rollback() (string, error) {
-	dir, err := histDir()
+// Rollback restores the most recent changeset for the given project.
+func Rollback(projectRoot string) (string, error) {
+	dir, err := projectDir(projectRoot)
 	if err != nil {
 		return "", err
 	}
 	entries, err := listEntries(dir)
 	if err != nil || len(entries) == 0 {
-		return "", fmt.Errorf("no history to roll back")
+		return "", fmt.Errorf("no history to roll back for %s", projectRoot)
 	}
-
 	latest := entries[len(entries)-1]
 	path := filepath.Join(dir, fmt.Sprintf("%04d.gob", latest))
 
@@ -150,22 +190,15 @@ func Rollback() (string, error) {
 		return "", fmt.Errorf("corrupt history entry %d: %w", latest, err)
 	}
 
-	// 1. Reverse moves (rename To → From).
 	for i := len(cs.Moves) - 1; i >= 0; i-- {
 		m := cs.Moves[i]
 		if err := os.MkdirAll(filepath.Dir(m.From), 0o755); err != nil {
 			return "", fmt.Errorf("rollback move mkdir: %w", err)
 		}
-		if err := os.Rename(m.To, m.From); err != nil {
-			// The file might already be at From if a previous rollback
-			// partially succeeded. Skip if the source (To) doesn't exist.
-			if !os.IsNotExist(err) {
-				return "", fmt.Errorf("rollback move %s -> %s: %w", m.To, m.From, err)
-			}
+		if err := os.Rename(m.To, m.From); err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("rollback move %s -> %s: %w", m.To, m.From, err)
 		}
 	}
-
-	// 2. Restore deleted files.
 	for _, d := range cs.Deletes {
 		if err := os.MkdirAll(filepath.Dir(d.Path), 0o755); err != nil {
 			return "", fmt.Errorf("rollback delete mkdir: %w", err)
@@ -174,8 +207,6 @@ func Rollback() (string, error) {
 			return "", fmt.Errorf("rollback restore %s: %w", d.Path, err)
 		}
 	}
-
-	// 3. Restore original file contents.
 	for path, content := range cs.Originals {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return "", fmt.Errorf("rollback mkdir: %w", err)
@@ -185,16 +216,16 @@ func Rollback() (string, error) {
 		}
 	}
 
-	// Remove the history entry.
-	_ = os.Remove(filepath.Join(dir, fmt.Sprintf("%04d.gob", latest)))
+	_ = os.Remove(path)
 
 	desc := fmt.Sprintf("rolled back: %s (from %s)", cs.Command, cs.Timestamp.Format("2006-01-02 15:04:05"))
 	return desc, nil
 }
 
-// List returns descriptions of all stored changesets (newest last).
-func List() ([]string, error) {
-	dir, err := histDir()
+// List returns descriptions of changesets stored for the given project
+// (newest last). Also returns the project root for header display.
+func List(projectRoot string) ([]string, error) {
+	dir, err := projectDir(projectRoot)
 	if err != nil {
 		return nil, err
 	}

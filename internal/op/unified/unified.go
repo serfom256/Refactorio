@@ -14,7 +14,9 @@ import (
 	"github.com/serfom256/refactorio/internal/lang/java"
 	"github.com/serfom256/refactorio/internal/lang/kotlin"
 	"github.com/serfom256/refactorio/internal/lang/typescript"
+	"github.com/serfom256/refactorio/internal/lang/csharp"
 	"github.com/serfom256/refactorio/internal/lang/rust"
+	"github.com/serfom256/refactorio/internal/op/csrename"
 	"github.com/serfom256/refactorio/internal/op/gorename"
 	"github.com/serfom256/refactorio/internal/op/ktrename"
 	"github.com/serfom256/refactorio/internal/op/renameclass"
@@ -38,6 +40,8 @@ func detectLang(file string) string {
 		return "ts"
 	case ".rs":
 		return "rust"
+	case ".cs":
+		return "csharp"
 	}
 	return ""
 }
@@ -58,6 +62,8 @@ func Rename(inFile, name, newName, root string) (*edit.Set, error) {
 		return renameTS(inFile, name, newName, root)
 	case "rust":
 		return renameRust(inFile, name, newName, root)
+	case "csharp":
+		return renameCSharp(inFile, name, newName, root)
 	}
 	return nil, fmt.Errorf("unsupported file type: %s", filepath.Ext(inFile))
 }
@@ -103,6 +109,13 @@ func Move(inFile, toPath, root string) (*edit.Set, []string, error) {
 		}
 		set, err := rstrename.PlanMove(rstrename.MoveRequest{File: inFile, NewPath: toPath, Index: idx})
 		return set, nil, err
+	case "csharp":
+		idx, err := csharpIndex(root)
+		if err != nil {
+			return nil, nil, err
+		}
+		set, err := csrename.PlanMove(csrename.MoveRequest{File: inFile, NewPath: toPath, Index: idx})
+		return set, nil, err
 	}
 	return nil, nil, fmt.Errorf("unsupported file type: %s", filepath.Ext(inFile))
 }
@@ -144,6 +157,16 @@ func Delete(inFile, root string) (*edit.Set, []string, error) {
 			return nil, nil, err
 		}
 		r, err := rstrename.PlanDelete(rstrename.DeleteRequest{File: inFile, Index: idx})
+		if err != nil {
+			return nil, nil, err
+		}
+		return r.Set, r.FilesWithReferences, nil
+	case "csharp":
+		idx, err := csharpIndex(root)
+		if err != nil {
+			return nil, nil, err
+		}
+		r, err := csrename.PlanDelete(csrename.DeleteRequest{File: inFile, Index: idx})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -801,6 +824,22 @@ func rustIndex(root string) (*rust.Index, error) {
 	}
 	abs, _ := filepath.Abs(root)
 	return rust.BuildIndex(abs)
+}
+
+func renameCSharp(file, name, newName, root string) (*edit.Set, error) {
+	idx, err := csharpIndex(root)
+	if err != nil {
+		return nil, err
+	}
+	return csrename.PlanRename(csrename.RenameRequest{File: file, Symbol: name, NewName: newName, Index: idx})
+}
+
+func csharpIndex(root string) (*csharp.Index, error) {
+	if root == "" {
+		root, _ = os.Getwd()
+	}
+	abs, _ := filepath.Abs(root)
+	return csharp.BuildIndex(abs)
 }
 
 // Keep kotlin and typescript imported.
