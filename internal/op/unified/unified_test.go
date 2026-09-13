@@ -1,11 +1,23 @@
 package unified
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/serfom256/refactorio/internal/op/usages"
 )
+
+func usagesFind(t *testing.T, file, name, root string) (*usages.Result, error) {
+	t.Helper()
+	return usages.Find(file, name, root, Rename)
+}
+
+func usagesFormatText(w io.Writer, r *usages.Result) error { return usages.FormatText(w, r) }
+func usagesFormatJSON(w io.Writer, r *usages.Result) error { return usages.FormatJSON(w, r) }
 
 func writeTree(t *testing.T, root string, files map[string]string) {
 	t.Helper()
@@ -503,6 +515,64 @@ public class User { Bar b; }
 	}
 	if !strings.Contains(user, "Baz b;") {
 		t.Errorf("usage not renamed:\n%s", user)
+	}
+}
+
+// End-to-end usages: rename probe → real findings across languages.
+func TestUsages_Java(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/foo/Bar.java": `package com.foo;
+public class Bar {}
+`,
+		"src/main/java/com/app/User.java": `package com.app;
+import com.foo.Bar;
+public class User { Bar b = new Bar(); }
+`,
+	})
+	file := filepath.Join(root, "src/main/java/com/foo/Bar.java")
+	result, err := usagesFind(t, file, "Bar", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total < 3 {
+		t.Errorf("expected at least 3 findings (1 decl + 2 usages), got %d: %+v", result.Total, result.Findings)
+	}
+	if result.Findings[0].Category != "declaration" {
+		t.Errorf("first finding should be declaration: %+v", result.Findings[0])
+	}
+}
+
+func TestUsages_FormatTextAndJSON(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"src/foo.ts":  `export class Foo {}`,
+		"src/main.ts": "import { Foo } from './foo';\nconst f = new Foo();\n",
+	})
+	file := filepath.Join(root, "src/foo.ts")
+	result, err := usagesFind(t, file, "Foo", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total == 0 {
+		t.Fatal("expected non-zero findings")
+	}
+	// Text format
+	var textBuf bytes.Buffer
+	if err := usagesFormatText(&textBuf, result); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(textBuf.String(), "(declaration)") {
+		t.Errorf("text format missing declaration tag:\n%s", textBuf.String())
+	}
+	// JSON format round-trip
+	var jsonBuf bytes.Buffer
+	if err := usagesFormatJSON(&jsonBuf, result); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(jsonBuf.String(), `"category": "declaration"`) {
+		t.Errorf("json missing declaration:\n%s", jsonBuf.String())
 	}
 }
 

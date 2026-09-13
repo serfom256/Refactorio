@@ -9,6 +9,7 @@ import (
 	"github.com/serfom256/refactorio/internal/cli"
 	"github.com/serfom256/refactorio/internal/edit"
 	"github.com/serfom256/refactorio/internal/history"
+	"github.com/serfom256/refactorio/internal/op/usages"
 )
 
 func init() {
@@ -120,6 +121,38 @@ use 'move' for individual files.`,
 	})
 
 	cli.RegisterCommand(cli.Command{
+		Name:    "usages",
+		Handler: HandleUsages,
+		Summary: "find where a symbol is declared and referenced",
+		Usage:   "usages in=<file> name=<symbol> [format=text|json] [root=<dir>]",
+		Help: `Reports where a symbol is declared and referenced across the project.
+Read-only: no files are modified.
+
+arguments:
+  in=<file>      file containing the symbol's declaration (required)
+  name=<symbol>  the symbol to look up (required)
+  format=<fmt>   output format: text (default, human-readable) or json
+  root=<dir>     project root; defaults to the working directory
+
+ordering:
+  1. primary declaration
+  2. usages, sorted by file:line
+  3. overload declarations (additional declarations) at the bottom
+
+what gets reported:
+  - the declaration site
+  - all references the rename engine would touch — same scoping rules
+
+what is NOT reported:
+  - import / using / namespace declarations
+  - file moves or path rewrites
+
+example:
+  refactorio usages in=src/main/java/com/foo/Bar.java name=Bar
+  refactorio usages in=src/foo.ts name=Foo format=json`,
+	})
+
+	cli.RegisterCommand(cli.Command{
 		Name:    "rollback",
 		Handler: HandleRollback,
 		Summary: "undo the last refactoring operation for the current project",
@@ -175,6 +208,38 @@ func resolveProjectRoot(args *cli.Args) string {
 
 func rebuildCommand(args *cli.Args) string {
 	return args.Subcommand + " " + strings.Join(args.RawPairs(), " ")
+}
+
+// HandleUsages: `refactorio usages in=<file> name=<symbol> [format=text|json] [root=<dir>]`
+func HandleUsages(args *cli.Args, stdout, stderr io.Writer) error {
+	inFile, err := args.Require("in")
+	if err != nil {
+		return err
+	}
+	name, err := args.Require("name")
+	if err != nil {
+		return err
+	}
+	format, _ := args.Get("format")
+	if format == "" {
+		format = "text"
+	}
+	if format != "text" && format != "json" {
+		return fmt.Errorf("format must be 'text' or 'json', got %q", format)
+	}
+	rootArg, _ := args.Get("root")
+	if unknown := args.Unknown("in", "name", "format", "root"); len(unknown) > 0 {
+		return fmt.Errorf("unknown arguments: %v", unknown)
+	}
+
+	result, err := usages.Find(inFile, name, rootArg, Rename)
+	if err != nil {
+		return err
+	}
+	if format == "json" {
+		return usages.FormatJSON(stdout, result)
+	}
+	return usages.FormatText(stdout, result)
 }
 
 func HandleRollback(args *cli.Args, stdout, stderr io.Writer) error {

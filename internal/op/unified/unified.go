@@ -15,10 +15,12 @@ import (
 	"github.com/serfom256/refactorio/internal/lang/kotlin"
 	"github.com/serfom256/refactorio/internal/lang/typescript"
 	"github.com/serfom256/refactorio/internal/lang/csharp"
+	"github.com/serfom256/refactorio/internal/lang/python"
 	"github.com/serfom256/refactorio/internal/lang/rust"
 	"github.com/serfom256/refactorio/internal/op/csrename"
 	"github.com/serfom256/refactorio/internal/op/gorename"
 	"github.com/serfom256/refactorio/internal/op/ktrename"
+	"github.com/serfom256/refactorio/internal/op/pyrename"
 	"github.com/serfom256/refactorio/internal/op/renameclass"
 	"github.com/serfom256/refactorio/internal/op/renamefield"
 	"github.com/serfom256/refactorio/internal/op/renamemethod"
@@ -42,6 +44,8 @@ func detectLang(file string) string {
 		return "rust"
 	case ".cs":
 		return "csharp"
+	case ".py":
+		return "python"
 	}
 	return ""
 }
@@ -64,6 +68,8 @@ func Rename(inFile, name, newName, root string) (*edit.Set, error) {
 		return renameRust(inFile, name, newName, root)
 	case "csharp":
 		return renameCSharp(inFile, name, newName, root)
+	case "python":
+		return renamePython(inFile, name, newName, root)
 	}
 	return nil, fmt.Errorf("unsupported file type: %s", filepath.Ext(inFile))
 }
@@ -116,6 +122,13 @@ func Move(inFile, toPath, root string) (*edit.Set, []string, error) {
 		}
 		set, err := csrename.PlanMove(csrename.MoveRequest{File: inFile, NewPath: toPath, Index: idx})
 		return set, nil, err
+	case "python":
+		idx, err := pythonIndex(root)
+		if err != nil {
+			return nil, nil, err
+		}
+		set, err := pyrename.PlanMove(pyrename.MoveRequest{File: inFile, NewPath: toPath, Index: idx})
+		return set, nil, err
 	}
 	return nil, nil, fmt.Errorf("unsupported file type: %s", filepath.Ext(inFile))
 }
@@ -167,6 +180,16 @@ func Delete(inFile, root string) (*edit.Set, []string, error) {
 			return nil, nil, err
 		}
 		r, err := csrename.PlanDelete(csrename.DeleteRequest{File: inFile, Index: idx})
+		if err != nil {
+			return nil, nil, err
+		}
+		return r.Set, r.FilesWithReferences, nil
+	case "python":
+		idx, err := pythonIndex(root)
+		if err != nil {
+			return nil, nil, err
+		}
+		r, err := pyrename.PlanDelete(pyrename.DeleteRequest{File: inFile, Index: idx})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -840,6 +863,22 @@ func csharpIndex(root string) (*csharp.Index, error) {
 	}
 	abs, _ := filepath.Abs(root)
 	return csharp.BuildIndex(abs)
+}
+
+func renamePython(file, name, newName, root string) (*edit.Set, error) {
+	idx, err := pythonIndex(root)
+	if err != nil {
+		return nil, err
+	}
+	return pyrename.PlanRename(pyrename.RenameRequest{File: file, Symbol: name, NewName: newName, Index: idx})
+}
+
+func pythonIndex(root string) (*python.Index, error) {
+	if root == "" {
+		root, _ = os.Getwd()
+	}
+	abs, _ := filepath.Abs(root)
+	return python.BuildIndex(abs)
 }
 
 // Keep kotlin and typescript imported.

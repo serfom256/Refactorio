@@ -32,12 +32,14 @@ No C compiler needed. No cgo. Cross-compiles to any OS/arch Go supports.
 | TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | Directory walk (excludes `node_modules`, `dist`, `build`) | File-path-based (`import { Foo } from './foo'`) |
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | Directory walk (same as TypeScript) | File-path-based (ES modules only, no CommonJS `require()`) |
 | Rust | `.rs` | `Cargo.toml`, workspace `[workspace.members]` | Module-path-based (`use crate::foo::Bar`) |
+| C# | `.cs` | `.csproj`, `.sln` (or any directory) | Namespace-based (`using Foo.Bar`) |
+| Python 3 | `.py` | `pyproject.toml`, `setup.py`, `setup.cfg` (or any directory) | Module-path-based (`from foo.bar import Baz`) |
 
 ---
 
 ## Commands
 
-Four commands. Language detected automatically from the file extension.
+Language is auto-detected from the file extension. Each command supports `--help` for detailed usage.
 
 | Command | Description | Usage |
 |---|---|---|
@@ -45,8 +47,9 @@ Four commands. Language detected automatically from the file extension.
 | `move` | Move a file, update all imports | `move in=<file> to=<newPath>` |
 | `delete` | Delete a file, clean up imports | `delete in=<file>` |
 | `rename-package` | Rename an entire package | `rename-package from=<old> to=<new>` |
-| `rollback` | Undo the last refactoring operation | `rollback` |
-| `history` | List recent refactoring operations | `history` |
+| `usages` | Find where a symbol is declared and referenced (read-only) | `usages in=<file> name=<symbol> [format=text\|json]` |
+| `rollback` | Undo the last refactoring operation (per-project) | `rollback` |
+| `history` | List recent refactoring operations (per-project) | `history` |
 
 All commands support `dry-run=true` to preview changes and `root=<dir>` to override the project root.
 
@@ -85,6 +88,16 @@ refactorio rename in=src/Button.jsx name=Button to=Btn
 **Rust:**
 ```bash
 refactorio rename in=src/foo.rs name=Bar to=Baz
+```
+
+**C#:**
+```bash
+refactorio rename in=src/Foo.cs name=Foo to=Bar
+```
+
+**Python 3:**
+```bash
+refactorio rename in=src/foo.py name=Foo to=Bar
 ```
 
 **What gets renamed:**
@@ -130,6 +143,12 @@ refactorio move in=src/utils/foo.ts to=src/lib/foo.ts
 
 # Rust
 refactorio move in=src/foo.rs to=src/bar.rs
+
+# C#
+refactorio move in=src/Foo.cs to=src/lib/Foo.cs
+
+# Python 3
+refactorio move in=utils/foo.py to=lib/foo.py
 ```
 
 **What gets updated:**
@@ -137,8 +156,12 @@ refactorio move in=src/foo.rs to=src/bar.rs
 - **Go:** package declaration updated to match new directory, import paths rewritten in all importing files
 - **TS/JS:** import paths rewritten in all importing files, relative imports inside the moved file recalculated
 - **Rust:** `use` paths rewritten across the crate
+- **C#:** `namespace` declaration updated to match new directory, `using` directives in dependents rewritten
+- **Python:** module path updates in dependents (`from foo.bar import X` → `from lib.foo import X`)
 
 Note: `to=` can be a directory — the source filename is appended automatically.
+
+**Java-specific safety check:** when moving a class out of its package, Refactorio detects package-private cross-references that will break after the move and prints a warning (the move still proceeds). Example: if the moved class uses a package-private sibling `Helper`, you'll see `Helper is package-private in com.foo and will not be importable after the move`.
 
 ---
 
@@ -156,6 +179,8 @@ refactorio delete in=src/main/kotlin/com/foo/Bar.kt
 refactorio delete in=pkg/foo.go
 refactorio delete in=src/foo.ts
 refactorio delete in=src/foo.rs
+refactorio delete in=src/Foo.cs
+refactorio delete in=src/foo.py
 ```
 
 **What gets done:**
@@ -164,6 +189,39 @@ refactorio delete in=src/foo.rs
 - `mod` declarations removed (Rust)
 - A warning lists files that still contain code references (manual cleanup needed)
 - Wildcard imports are NOT removed (they cover the whole package)
+
+---
+
+## usages
+
+Read-only command that reports where a symbol is declared and referenced across the project. No files are modified — this is the "find all references" / "where used" feature.
+
+```
+refactorio usages in=<file> name=<symbol> [format=text|json] [root=<dir>]
+```
+
+```bash
+refactorio usages in=src/main/java/com/foo/Bar.java name=Bar
+refactorio usages in=src/foo.ts name=Foo format=json
+```
+
+**Output ordering:**
+1. Primary declaration
+2. All usages, sorted by file:line
+3. Additional declarations (method overloads, etc.) at the bottom
+
+**Text output (default):**
+```
+src/Foo.cs:5:14    (declaration)   public class Foo {
+src/Main.cs:8:18                   var f = new Foo();
+src/Other.cs:3:1                   Foo helper;
+
+3 usage(s) of "Foo" across 3 file(s).
+```
+
+**JSON output** (`format=json`): structured findings with file/line/column/category/text for tool integration.
+
+Implementation: drives the rename engine with a probe name and converts each candidate edit into a finding — guaranteeing usages and rename are consistent (what you see is what rename would touch). Works for all 7 supported languages.
 
 ---
 
@@ -209,19 +267,19 @@ Note: TypeScript/JavaScript and Rust do not have a package-rename equivalent —
 
 ## Rollback
 
-Every refactoring operation is automatically saved to `~/.refactorio/history/`. If you make a mistake, undo it:
+Every refactoring operation is automatically saved to `~/.refactorio/projects/<hash>/history/` (per-project — the hash is derived from the absolute project root). If you make a mistake, undo it:
 
 ```bash
-# Undo the last operation
+# Undo the last operation for the current project
 refactorio rollback
 
-# See what operations are in the history stack
+# See what operations are in this project's stack
 refactorio history
 ```
 
-The history stack holds the last 10 operations. Each entry stores the original file contents, so rollback restores files exactly as they were before the refactoring. Rollback reverses moves and restores deleted files.
+**Per-project stacks** — each project gets its own history of the last 10 operations. The project root is auto-detected by walking up from the working directory (or `root=<dir>`) looking for `go.mod`, `Cargo.toml`, `pyproject.toml`, `setup.py`, `settings.gradle{.kts}`, `pom.xml`, `package.json`, or `tsconfig.json`. Two projects on the same machine maintain independent histories.
 
-History is stored outside your project directory (`~/.refactorio/history/`), so it doesn't pollute your repo and works across projects.
+Each entry stores the original file contents; rollback restores files exactly as they were, reverses moves, and recreates deleted files. History is stored outside your project directory so it doesn't pollute your repo.
 
 ---
 
@@ -255,6 +313,7 @@ $ refactorio rename in=pkg/foo.go name=Hello to=Greet dry-run=true
 | Inline FQN references (`com.foo.Bar x`) renamed/rewritten on move | Non-standard Gradle source roots not detected |
 | Import rewriting (explicit, static, wildcard) | Programmatic Gradle includes invisible |
 | Move class across packages (same-package files get imports added) | |
+| Package-private access warning on move (type-level) | Member-level access (package-private methods/fields) not tracked |
 | Delete class + import cleanup | |
 | Rename entire package | |
 | Multi-module Gradle and Maven projects | |
@@ -313,6 +372,36 @@ $ refactorio rename in=pkg/foo.go name=Hello to=Greet dry-run=true
 | Lifetime `'a` vs char `'x'` correctly distinguished | |
 | Local variable declarations (`let Foo = 1`) not wrongly renamed | |
 
+### C#
+
+| What works | What doesn't |
+|---|---|
+| class/interface/struct/enum/record/delegate rename across project | No overload disambiguation — renames ALL methods with that name |
+| Method/property/field rename | No inheritance tracking — overrides in derived classes not found |
+| Block-scoped + file-scoped namespaces (`namespace Foo;`) | Cross-project (`.csproj` boundaries) renaming not tracked |
+| All `using` forms: regular, `using static`, `using X = Y` alias, `global using` | Reflection (`Type.GetType(...)`) not detected |
+| Verbatim strings `@"..."` excluded (no false positives in paths) | Roslyn analyzers / source generators invisible |
+| Interpolated strings `$"hello {name}"` — references inside `{...}` renamed | |
+| Raw strings `"""..."""` (C# 11) handled | |
+| Multi-line attributes `[Serializable]` correctly skipped | |
+| Move file + namespace declaration update + `using` rewrites | |
+| Local variable declarations (`int Foo = 1`) not wrongly renamed | |
+
+### Python 3
+
+| What works | What doesn't |
+|---|---|
+| Top-level class/function/async-function/variable rename | Local variable rename inside function bodies not supported (would need full scope analysis) |
+| All import forms: `import x`, `import x as y`, `from x import a`, `from . import b`, parenthesised multi-line, `from x import *` | Star imports (`from x import *`) — usages of those bindings not tracked |
+| Aliased imports preserved (`from x import Foo as F` — `F` and its usages untouched) | Decorators that modify visibility/binding (e.g. `@classmethod`) not type-checked |
+| Module-qualified usages (`foo.Bar()`) renamed | Type stubs (`.pyi`) not indexed |
+| f-string interpolation `f"{name}"` — references renamed | Reflection / `getattr(obj, "name")` not detected |
+| Triple-quoted strings `"""..."""` correctly excluded | |
+| Raw / byte string prefixes (`r"..."`, `b"..."`, `rb"..."`) handled | |
+| Decorators (`@property`, `@dataclass`) correctly skipped | |
+| Move file + `from x import` / `import x.y` path updates | |
+| `__pycache__`, `.venv`, `venv`, `dist`, `build` excluded automatically | |
+
 ### Cross-Language Limitations (all languages)
 
 - **Position-aware but not type-aware.** Local variable declarations sharing a symbol name are skipped (`let Foo = 1`, `String Foo = "x"`, `val Foo`, `Foo := 1`). But two types with the same name in different scopes may still collide without type resolution.
@@ -335,6 +424,10 @@ $ refactorio rename in=pkg/foo.go name=Hello to=Greet dry-run=true
 
 **Cargo** — reads `Cargo.toml` for the crate name. All `.rs` files under `src/` are indexed (excluding `target/`). Module paths computed from filesystem layout (`src/foo.rs` → `crate::foo`, `src/foo/mod.rs` → `crate::foo`).
 
+**.NET** — walks the directory tree for `.cs` files, excluding `bin/`, `obj/`, `node_modules`, `.git`. Namespaces detected from file content, not directory structure.
+
+**Python** — walks the directory tree for `.py` files, excluding `.venv`, `venv`, `__pycache__`, `.git`, `.tox`, `dist`, `build`, `.eggs`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`. Module paths derived from filesystem (`foo/bar.py` → `foo.bar`, `foo/__init__.py` → `foo`).
+
 ---
 
 ## Adding a New Language
@@ -354,11 +447,12 @@ $ refactorio rename in=pkg/foo.go name=Hello to=Greet dry-run=true
 ## Architecture
 
 ```
-cmd/refactorio/main.go             CLI entry (6 commands: rename, move, delete, rename-package, rollback, history)
-internal/cli/                      key=value arg parser + subcommand dispatch
+cmd/refactorio/main.go             CLI entry (7 commands: rename, move, delete, rename-package, usages, rollback, history)
+internal/cli/                      key=value arg parser + subcommand dispatch + --help system
 internal/edit/                     Edit/Move/Delete sets, atomic apply, dry-run
 internal/project/                  Java/Kotlin project detection (Gradle/Maven)
 internal/index/                    Java project-wide symbol index
+internal/history/                  Per-project undo/rollback history (~/.refactorio/projects/<hash>/)
 internal/lang/
   common/                          Shared Range + TokenKind types
   java/                            Java lexer + symbol extractor
@@ -366,9 +460,11 @@ internal/lang/
   golang/                          Go lexer + symbol extractor + index
   typescript/                      TS/JS lexer + symbol extractor + index
   rust/                            Rust lexer + symbol extractor + index
-internal/history/                  Undo/rollback history (~/.refactorio/history/)
+  csharp/                          C# lexer + symbol extractor + index
+  python/                          Python 3 lexer + symbol extractor + index
 internal/op/
-  unified/                         Unified rename/move/delete dispatcher + FQN scanner
+  unified/                         Unified rename/move/delete dispatcher + FQN scanner + access warnings
+  usages/                          Read-only find-usages (drives the rename layer)
   renameclass/                     Java class rename logic (position-aware)
   renamemethod/                    Java method rename logic (receiver-typed)
   renamefield/                     Java field rename logic (shadow-aware)
@@ -379,6 +475,8 @@ internal/op/
   gorename/                        Go rename/move/delete/rename-package logic
   tsrename/                        TS/JS rename/move/delete logic
   rstrename/                       Rust rename/move/delete logic
+  csrename/                        C# rename/move/delete logic
+  pyrename/                        Python 3 rename/move/delete logic
 ```
 
 ## Running Tests
@@ -387,7 +485,7 @@ internal/op/
 go test ./...
 ```
 
-~170 tests across 22 packages. No external tools or services required.
+~250 tests across 26 packages. No external tools or services required.
 
 ## License
 
