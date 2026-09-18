@@ -5,6 +5,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Handler executes a parsed subcommand. Implementations live next to
@@ -77,8 +78,23 @@ func Dispatch(argv []string, stdout, stderr io.Writer) error {
 	if !ok {
 		return fmt.Errorf("unknown subcommand %q\n\n%s", args.Subcommand, Usage())
 	}
-	return c.Handler(args, stdout, stderr)
+	start := time.Now()
+	err = c.Handler(args, stdout, stderr)
+	if observer != nil {
+		observer(args, time.Since(start), err)
+	}
+	return err
 }
+
+// Observer is notified after each dispatched command completes. It exists so
+// that usage statistics can be recorded from one place without this package
+// depending on the statistics package.
+type Observer func(args *Args, dur time.Duration, err error)
+
+var observer Observer
+
+// SetObserver installs the dispatch observer. Passing nil disables it.
+func SetObserver(o Observer) { observer = o }
 
 // Usage returns the top-level command list with one-line summaries.
 func Usage() string {

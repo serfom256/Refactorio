@@ -107,7 +107,11 @@ func planFile(
 		targetBody = &bodyRange{Start: target.BodyRange.Start, End: target.BodyRange.End}
 	}
 
-	// Scan for method call patterns: <receiver>.<name>( or bare <name>(
+	// Scan for method call patterns — <receiver>.<name>( or bare <name>( —
+	// and method references, <receiver>::<name>. A method reference has
+	// neither the dot nor the parenthesis, so it needs its own test; missing
+	// it left `builder::build`, `this::build` and `Builder::make` pointing at
+	// a method that no longer existed.
 	for i, tok := range tokens {
 		if tok.Kind != java.TIdent || tok.Text != oldName {
 			continue
@@ -116,15 +120,20 @@ func planFile(
 		if fe.Path == target.File && isDeclRange(tok, target) {
 			continue
 		}
-		// Check if followed by '('
-		next := nextNonComment(tokens, i+1)
-		if next == nil || next.Text != "(" {
-			continue
-		}
-		// Check for receiver: token before this one should be '.'
 		prev := prevNonComment(tokens, i-1)
-		if prev != nil && prev.Text == "." {
-			// obj.method( or Class.method( or this.method(
+		// The lexer emits "::" as an operator token, so match on text alone.
+		isRef := prev != nil && prev.Text == "::"
+		if !isRef {
+			// A call must be followed by '('.
+			next := nextNonComment(tokens, i+1)
+			if next == nil || next.Text != "(" {
+				continue
+			}
+		}
+		if isRef || (prev != nil && prev.Text == ".") {
+			// obj.method( / Class.method( / this.method(, or the reference
+			// forms obj::method / Class::method / this::method. The receiver
+			// is classified identically either way.
 			receiver := prevNonComment(tokens, indexOfToken(tokens, prev)-1)
 			if receiver == nil {
 				continue
@@ -133,9 +142,13 @@ func planFile(
 			if !ok {
 				continue
 			}
+			kind := "call"
+			if isRef {
+				kind = "method reference"
+			}
 			set.Add(edit.Edit{
 				File: fe.Path, Start: tok.Start, End: tok.End,
-				NewText: newName, Why: fmt.Sprintf("rename call %s.%s -> %s [%s]", target.Name, oldName, newName, conf),
+				NewText: newName, Why: fmt.Sprintf("rename %s %s.%s -> %s [%s]", kind, target.Name, oldName, newName, conf),
 			})
 		} else {
 			// Bare call: method(

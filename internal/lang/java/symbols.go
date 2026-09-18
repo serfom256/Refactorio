@@ -105,8 +105,11 @@ func (p *symParser) parse() *FileSymbols {
 			continue
 		}
 		// Annotations precede/interleave with modifiers; skip without
-		// resetting the pending visibility.
-		if tok.Kind == TPunct && tok.Text == "@" {
+		// resetting the pending visibility. `@interface` is the exception: it
+		// declares an annotation type rather than applying an annotation, so
+		// it must fall through to atTypeKeyword below. Treating it as a usage
+		// skipped the declaration and left annotation types unindexed.
+		if tok.Kind == TPunct && tok.Text == "@" && !p.atTypeKeyword() {
 			p.skip()
 			p.skipAnnotation()
 			continue

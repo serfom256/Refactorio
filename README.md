@@ -45,10 +45,11 @@ Language is auto-detected from the file extension. Each command supports `--help
 |---|---|---|
 | `rename` | Rename a symbol across the project | `rename in=<file> name=<symbol> to=<newName>` |
 | `move` | Move a file, update all imports | `move in=<file> to=<newPath>` |
-| `delete` | Delete a file, clean up imports | `delete in=<file>` |
-| `rename-package` | Rename an entire package | `rename-package from=<old> to=<new>` |
+| `delete` | Delete a file, clean up imports | `delete in=<file> [force=true]` |
+| `rename-package` | Rename a package — owned (moves files) or external (rewrites references) | `rename-package from=<old> to=<new>` |
 | `usages` | Find where a symbol is declared and referenced (read-only) | `usages in=<file> name=<symbol> [format=text\|json]` |
 | `rollback` | Undo the last refactoring operation (per-project) | `rollback` |
+| `stats` | Show how Refactorio itself has been used (local, private) | `stats [scope=project\|all] [since=7d]` |
 | `history` | List recent refactoring operations (per-project) | `history` |
 
 All commands support `dry-run=true` to preview changes and `root=<dir>` to override the project root.
@@ -187,7 +188,27 @@ refactorio delete in=src/foo.py
 - The file is deleted from disk
 - Import statements referencing the file/class are removed from all dependents (`import`, `use`)
 - `mod` declarations removed (Rust)
-- A warning lists files that still contain code references (manual cleanup needed)
+- Files that still reference the deleted symbol are listed by name, and the
+  delete is **refused** unless `force=true` is passed
+
+Surviving references are computed with the same machinery as `usages`, so the
+list matches what `usages` reports. Two consequences worth knowing:
+
+- **Same-package users are included**, even though they have no import to
+  clean. This is the case that matters most — in Java a sibling class in the
+  same package needs no import, so an import-driven check never sees it and
+  the delete breaks the build silently.
+- **Import-only dependents are not listed.** If a file's only mention of the
+  symbol was the import, removing that import *is* the cleanup.
+
+```
+$ refactorio delete in=src/main/java/com/ex/Doomed.java
+
+warning: 2 files still reference the deleted symbol and will not compile:
+  src/main/java/com/ex/SamePackageUser.java
+  src/main/java/com/other/RealUser.java
+error: refusing to delete: 2 file(s) still reference it — fix those, or re-run with force=true
+```
 - Wildcard imports are NOT removed (they cover the whole package)
 
 ---
@@ -212,12 +233,15 @@ refactorio usages in=src/foo.ts name=Foo format=json
 
 **Text output (default):**
 ```
-src/Foo.cs:5:14    (declaration)   public class Foo {
-src/Main.cs:8:18                   var f = new Foo();
-src/Other.cs:3:1                   Foo helper;
+src/Foo.cs:5:14    public class Foo {  (declaration)
+src/Main.cs:8:18   var f = new Foo();
+src/Other.cs:3:1   Foo helper;
 
 3 usage(s) of "Foo" across 3 file(s).
 ```
+
+Paths are relative to the working directory and the category tag trails the
+source line, so plain usages — the overwhelming majority — pay nothing for it.
 
 **JSON output** (`format=json`): structured findings with file/line/column/category/text for tool integration.
 
@@ -248,6 +272,44 @@ refactorio rename-package from=example.com/proj/pkg to=example.com/proj/lib
 - Wildcard imports updated
 - Sub-packages are NOT renamed (only the exact package)
 
+### External packages (javax.* → jakarta.*)
+
+If the package has no sources in the project, `rename-package` switches to
+reference-only mode: imports and inline fully-qualified references are
+rewritten, and **no file is moved, created or deleted**. The mode is chosen
+automatically — sources present means move, sources absent means rewrite.
+
+```bash
+refactorio rename-package from=javax.persistence to=jakarta.persistence
+```
+
+```java
+// before                                    after
+import javax.persistence.Entity;          →  import jakarta.persistence.Entity;
+import javax.persistence.criteria.Root;   →  import jakarta.persistence.criteria.Root;
+import javax.persistence.*;               →  import jakarta.persistence.*;
+import static javax.persistence.X.ALL;    →  import static jakarta.persistence.X.ALL;
+javax.persistence.EntityManager em;       →  jakarta.persistence.EntityManager em;
+
+import javax.sql.DataSource;              →  unchanged  (JDK, must not move)
+javax.sql.rowset.CachedRowSet crs;        →  unchanged
+// javax.persistence in a comment         →  unchanged
+"javax.persistence.Entity"                →  unchanged  (string literal)
+```
+
+Matching is on **dot boundaries**, which is the reason to use this rather than
+`sed` for the job: `javax.persistence` covers `javax.persistence.criteria` but
+never `javax.sql` or `javax.persistencex`. Sub-packages are included by design
+— a migration that skipped them would leave the project half-converted.
+
+Java and Kotlin only. If the package is neither owned nor referenced anywhere,
+the command errors rather than silently doing nothing.
+
+**A clean run is not a finished migration.** Refactorio reads source, so it
+cannot see `persistence.xml`, `web.xml`, Gradle/Maven coordinates, Spring XML,
+or provider class names inside configuration strings. Those still need changing
+by hand.
+
 Note: TypeScript/JavaScript and Rust do not have a package-rename equivalent — use `move` to relocate individual files, or rename the module in Rust's `mod` declarations manually.
 
 ---
@@ -262,6 +324,75 @@ Note: TypeScript/JavaScript and Rust do not have a package-rename equivalent —
 | `from=<package>` | Source package (for rename-package). |
 | `root=<dir>` | Project root directory. Defaults to working directory. |
 | `dry-run=true` | Preview changes without writing to disk. |
+
+---
+
+## stats
+
+Reports how Refactorio itself has been used: which commands ran, which
+arguments they were given, how often they succeeded, and how much code was
+rewritten.
+
+```
+refactorio stats [scope=project|all] [since=<7d|2w|12h|YYYY-MM-DD>] [format=text|json] [reset=true]
+```
+
+```
+$ refactorio stats
+
+Refactorio usage — /Users/me/work/acme
+63 invocations
+
+command           runs    ok   err  dry-run     lines
+rename              38    35     3       22        914
+usages              14    14     0        0          0
+move                 7     6     1        4        203
+
+language           runs
+java                41
+kotlin              12
+
+argument           uses
+in                  59
+name                52
+dry-run             26
+
+error                     count
+package not found             3
+symbol not found              2
+
+code refactored (applied runs only)
+  1117 lines changed across 318 files (1204 edits)
+  86 lines moved
+```
+
+`lines` counts **distinct source lines rewritten**, not edits — a rename often
+lands several edits on one line, and counting edits would overstate the work.
+Only runs that were actually applied contribute: a dry run or a failed run
+adds to the usage counts but changes no code, so it contributes no lines.
+`move` and `delete` also report lines moved and lines deleted.
+
+### Privacy
+
+Everything is recorded locally in `~/.refactorio/stats.jsonl` and **nothing is
+ever transmitted anywhere**. Symbol names, the file paths inside your project
+and raw error text are deliberately not recorded — argument *names* and a
+classified error *kind* answer "what gets used and what fails" without turning
+the log into a record of the code being refactored. The project root is kept,
+because statistics are scoped per project and the rollback history already
+stores it.
+
+A recorded entry looks like this in full:
+
+```json
+{"ts":"2026-09-13T20:26:08Z","version":"dev","command":"rename",
+ "args":["in","name","to"],"lang":"java","project":"/Users/me/work/acme",
+ "ok":true,"ms":33,"files":2,"edits":5,"lines_changed":3}
+```
+
+Turn recording off with `REFACTORIO_NO_STATS=1`, and clear what has been
+recorded with `refactorio stats reset=true`. The log is capped at 8 MB; past
+that the older half is dropped.
 
 ---
 
@@ -290,13 +421,29 @@ Every command supports `dry-run=true`:
 ```
 $ refactorio rename in=pkg/foo.go name=Hello to=Greet dry-run=true
 
-2 files would be modified, 3 edits, 0 moves, 0 deletes
+2 files, 3 edits, 0 moves, 0 deletes
   pkg/foo.go (2 edits)
-    pkg/foo.go:3  "Hello" -> "Greet"  rename declaration Hello -> Greet
-    pkg/foo.go:5  "Hello" -> "Greet"  rename Hello -> Greet
-  main.go (1 edits)
-    main.go:5  "Hello" -> "Greet"  rename pkg.Hello -> pkg.Greet
+    3  "Hello" -> "Greet"  rename declaration Hello -> Greet
+    5  "Hello" -> "Greet"  rename Hello -> Greet
+  main.go (1 edit)
+    5  "Hello" -> "Greet"  rename pkg.Hello -> pkg.Greet
 ```
+
+The format is deliberately compact, since the output is usually consumed by a
+tool or an agent rather than scrolled by a human. Paths are relative to the
+working directory, each file is named once for its whole group rather than
+once per edit, and edits sharing a replacement and a reason collapse onto a
+single line listing the lines they occur on:
+
+```
+  internal/edit/edit_test.go (8 edits)
+    37,47,56,69,87,107,123,134  "NewSet" -> "CreateSet"  rename NewSet -> CreateSet
+```
+
+Two edits on the same line are shown as `5(2)` rather than a repeated `5,5`.
+
+On a 20-file / 45-edit rename this cuts the report from ~8.9 KB to ~2.4 KB
+without losing a single edit location.
 
 ---
 
@@ -307,9 +454,10 @@ $ refactorio rename in=pkg/foo.go name=Hello to=Greet dry-run=true
 | What works | What doesn't |
 |---|---|
 | Class rename (position-aware, skips local vars with same name) | No overload disambiguation — renames ALL methods with that name |
-| Method rename with receiver-type tracking (HIGH/MEDIUM confidence) | No inheritance tracking — overrides in subclasses not found |
+| Method rename with receiver-type tracking (HIGH/MEDIUM confidence), including method references (`obj::m`, `this::m`, `Type::m`) | No inheritance tracking — overrides in subclasses not found |
 | Field rename with shadow detection (skips shadowed bare references) | Generic/array/qualified types not recognized by type scanner |
 | Constructor rename when class is renamed | Reflection (`Class.forName(...)`) and annotation strings not detected |
+| Annotation types (`@interface`) — rename, move, delete, usages, rename-package; `@Foo` usage sites renamed too | Nested types (inner classes, nested `@interface`) are not indexed as types |
 | Inline FQN references (`com.foo.Bar x`) renamed/rewritten on move | Non-standard Gradle source roots not detected |
 | Import rewriting (explicit, static, wildcard) | Programmatic Gradle includes invisible |
 | Move class across packages (same-package files get imports added) | |
@@ -465,6 +613,7 @@ internal/lang/
 internal/op/
   unified/                         Unified rename/move/delete dispatcher + FQN scanner + access warnings
   usages/                          Read-only find-usages (drives the rename layer)
+  refs/                            Shared dangling-reference check used by delete
   renameclass/                     Java class rename logic (position-aware)
   renamemethod/                    Java method rename logic (receiver-typed)
   renamefield/                     Java field rename logic (shadow-aware)

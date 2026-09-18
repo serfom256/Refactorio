@@ -51,8 +51,10 @@ func Plan(req Request) (*Result, error) {
 		if fe == nil || fe.Symbols == nil {
 			continue
 		}
-		removed := removeImports(fe, target.FQN, set)
-		if hasCodeReferences(fe.Path, target.Name) || removed {
+		// Removing the import is the cleanup, not evidence that cleanup is
+		// still needed, so its result deliberately does not feed into refs.
+		removeImports(fe, target.FQN, set)
+		if hasCodeReferences(fe, target.Name) {
 			refs = append(refs, path)
 		}
 	}
@@ -93,17 +95,35 @@ func removeImports(fe *index.FileEntry, targetFQN string, set *edit.Set) bool {
 	return removed
 }
 
-// hasCodeReferences scans the file for identifier tokens matching the
-// class name outside of import statements. A rough check for whether
-// the file still references the deleted class in code.
-func hasCodeReferences(path, className string) bool {
-	src, err := os.ReadFile(path)
+// hasCodeReferences reports whether the file still references className in
+// code once the imports naming it have been removed. A rough check — it is
+// name-based, not type-aware.
+//
+// Identifiers inside import statements are skipped. Those ranges are already
+// queued for deletion, so counting them reported every single file whose
+// import had just been cleaned as still needing manual cleanup.
+func hasCodeReferences(fe *index.FileEntry, className string) bool {
+	src, err := os.ReadFile(fe.Path)
 	if err != nil {
 		return false
 	}
-	tokens := java.Tokenize(src)
-	for _, tok := range tokens {
-		if tok.Kind == java.TIdent && tok.Text == className {
+	for _, tok := range java.Tokenize(src) {
+		if tok.Kind != java.TIdent || tok.Text != className {
+			continue
+		}
+		if withinImport(fe.Symbols.Imports, tok.Start) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// withinImport reports whether byte offset off falls inside any import
+// statement in the file.
+func withinImport(imports []java.ImportSpec, off int) bool {
+	for _, imp := range imports {
+		if off >= imp.Range.Start && off < imp.Range.End {
 			return true
 		}
 	}

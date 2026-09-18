@@ -9,6 +9,7 @@ import (
 
 	"github.com/serfom256/refactorio/internal/edit"
 	"github.com/serfom256/refactorio/internal/lang/python"
+	"github.com/serfom256/refactorio/internal/op/refs"
 )
 
 type RenameRequest struct {
@@ -174,7 +175,7 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 	modPath := req.Index.FileToModulePath(req.File)
 
 	set := edit.NewSet()
-	var refs []string
+	var filesWithRefs []string
 
 	// Remove imports referencing this module.
 	for _, path := range req.Index.AllFiles() {
@@ -185,23 +186,29 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 		if pfe == nil || pfe.Symbols == nil {
 			continue
 		}
-		removed := false
+		var spans []refs.Span
+		var bound, stillBound []string
 		for _, imp := range pfe.Symbols.Imports {
-			if imp.Path == modPath || strings.HasPrefix(imp.Path, modPath+".") {
-				set.Add(edit.Edit{
-					File: path, Start: imp.Range.Start, End: imp.Range.End,
-					NewText: "", Why: "remove import for deleted module",
-				})
-				removed = true
+			hit := imp.Path == modPath || strings.HasPrefix(imp.Path, modPath+".")
+			names := pyBindings(imp)
+			if !hit {
+				stillBound = append(stillBound, names...)
+				continue
 			}
+			set.Add(edit.Edit{
+				File: path, Start: imp.Range.Start, End: imp.Range.End,
+				NewText: "", Why: "remove import for deleted module",
+			})
+			spans = append(spans, refs.Span{Start: imp.Range.Start, End: imp.Range.End})
+			bound = append(bound, names...)
 		}
-		if removed {
-			refs = append(refs, path)
+		if danglingPy(path, bound, stillBound, spans) {
+			filesWithRefs = append(filesWithRefs, path)
 		}
 	}
 
 	set.AddDelete(req.File, "delete file")
-	return &DeleteResult{Set: set, FilesWithReferences: refs}, nil
+	return &DeleteResult{Set: set, FilesWithReferences: filesWithRefs}, nil
 }
 
 // renameInFile scans tokens, renaming identifier matches while skipping
@@ -238,9 +245,9 @@ func renameInFile(path, oldName, newName string, skipRange python.Range, set *ed
 // renameInImportingFile handles a file that imports the symbol from
 // the module we're renaming a symbol IN. We rewrite:
 //
-//   from <module> import <oldName>           → from <module> import <newName>
-//   from <module> import <oldName> as <X>    → from <module> import <newName> as <X>
-//   <module>.<oldName>                       → <module>.<newName>
+//	from <module> import <oldName>           → from <module> import <newName>
+//	from <module> import <oldName> as <X>    → from <module> import <newName> as <X>
+//	<module>.<oldName>                       → <module>.<newName>
 //
 // Plus bare references to the local binding (when no alias is used).
 func renameInImportingFile(path, modulePath, oldName, newName string, idx *python.Index, set *edit.Set) error {
@@ -392,4 +399,50 @@ func indexOf(tokens []python.Token, t *python.Token) int {
 		}
 	}
 	return -1
+}
+
+// pyBindings returns the local names an import introduces.
+//
+// `from foo.bar import Baz as B` binds B; `import foo.bar` binds only the
+// top-level package name foo, which is why a surviving `import foo.baz` keeps
+// foo live after `foo.bar` is deleted.
+func pyBindings(imp python.ImportDecl) []string {
+	if imp.IsFrom {
+		names := make([]string, 0, len(imp.Names))
+		for _, n := range imp.Names {
+			names = append(names, n.LocalName())
+		}
+		return names
+	}
+	for _, n := range imp.Names {
+		if n.Alias != "" {
+			return []string{n.Alias}
+		}
+	}
+	path := strings.TrimLeft(imp.Path, ".")
+	if i := strings.IndexByte(path, '.'); i >= 0 {
+		path = path[:i]
+	}
+	if path == "" {
+		return nil
+	}
+	return []string{path}
+}
+
+// danglingPy reports whether path still uses a name the removed imports bound.
+func danglingPy(path string, bound, stillBound []string, spans []refs.Span) bool {
+	if len(bound) == 0 {
+		return false
+	}
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var idents []refs.Ident
+	for _, tok := range python.Tokenize(src) {
+		if tok.Kind == python.TIdent {
+			idents = append(idents, refs.Ident{Name: tok.Text, Start: tok.Start})
+		}
+	}
+	return refs.Dangling(idents, bound, stillBound, spans)
 }

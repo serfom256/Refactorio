@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/serfom256/refactorio/internal/cli"
 	"github.com/serfom256/refactorio/internal/op/usages"
 )
 
@@ -18,6 +19,17 @@ func usagesFind(t *testing.T, file, name, root string) (*usages.Result, error) {
 
 func usagesFormatText(w io.Writer, r *usages.Result) error { return usages.FormatText(w, r) }
 func usagesFormatJSON(w io.Writer, r *usages.Result) error { return usages.FormatJSON(w, r) }
+
+// runDelete drives the delete command the way the CLI does, so the tests cover
+// the refusal gate and not just the planning layer.
+func runDelete(t *testing.T, out io.Writer, argv ...string) error {
+	t.Helper()
+	args, err := cli.Parse(append([]string{"delete"}, argv...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return HandleDelete(args, out, io.Discard)
+}
 
 func writeTree(t *testing.T, root string, files map[string]string) {
 	t.Helper()
@@ -204,8 +216,8 @@ public class Helper {}
 func TestUnifiedDelete_Java(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"build.gradle": "",
-		"src/main/java/com/foo/Bar.java": "package com.foo; public class Bar {}\n",
+		"build.gradle":                    "",
+		"src/main/java/com/foo/Bar.java":  "package com.foo; public class Bar {}\n",
 		"src/main/java/com/app/User.java": "package com.app;\nimport com.foo.Bar;\npublic class User { Bar b; }\n",
 	})
 	file := filepath.Join(root, "src/main/java/com/foo/Bar.java")
@@ -292,9 +304,9 @@ func TestUnifiedDelete_TS(t *testing.T) {
 func TestUnifiedRename_Go(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"go.mod":   "module example.com/proj\ngo 1.21\n",
+		"go.mod":     "module example.com/proj\ngo 1.21\n",
 		"pkg/foo.go": "package pkg\n\nfunc Hello() string { return \"hi\" }\n",
-		"main.go":  "package main\n\nimport \"example.com/proj/pkg\"\n\nfunc main() { println(pkg.Hello()) }\n",
+		"main.go":    "package main\n\nimport \"example.com/proj/pkg\"\n\nfunc main() { println(pkg.Hello()) }\n",
 	})
 	file := filepath.Join(root, "pkg/foo.go")
 	set, err := Rename(file, "Hello", "Greet", root)
@@ -313,9 +325,9 @@ func TestUnifiedRename_Go(t *testing.T) {
 func TestUnifiedMove_Go(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"go.mod":    "module example.com/proj\ngo 1.21\n",
+		"go.mod":     "module example.com/proj\ngo 1.21\n",
 		"pkg/foo.go": "package pkg\nfunc Hello() {}\n",
-		"main.go":   "package main\nimport \"example.com/proj/pkg\"\nfunc main() { pkg.Hello() }\n",
+		"main.go":    "package main\nimport \"example.com/proj/pkg\"\nfunc main() { pkg.Hello() }\n",
 	})
 	from := filepath.Join(root, "pkg/foo.go")
 	to := filepath.Join(root, "lib/foo.go")
@@ -335,9 +347,9 @@ func TestUnifiedMove_Go(t *testing.T) {
 func TestUnifiedDelete_Go(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"go.mod":    "module example.com/proj\ngo 1.21\n",
+		"go.mod":     "module example.com/proj\ngo 1.21\n",
 		"pkg/foo.go": "package pkg\nfunc Hello() {}\n",
-		"main.go":   "package main\nimport \"example.com/proj/pkg\"\nfunc main() { pkg.Hello() }\n",
+		"main.go":    "package main\nimport \"example.com/proj/pkg\"\nfunc main() { pkg.Hello() }\n",
 	})
 	file := filepath.Join(root, "pkg/foo.go")
 	set, _, err := Delete(file, root)
@@ -357,8 +369,8 @@ func TestUnifiedDelete_Go(t *testing.T) {
 func TestUnifiedRename_Kotlin(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"build.gradle": "",
-		"src/main/kotlin/com/foo/Bar.kt": "package com.foo\nclass Bar\n",
+		"build.gradle":                    "",
+		"src/main/kotlin/com/foo/Bar.kt":  "package com.foo\nclass Bar\n",
 		"src/main/kotlin/com/app/User.kt": "package com.app\nimport com.foo.Bar\nval b = Bar()\n",
 	})
 	file := filepath.Join(root, "src/main/kotlin/com/foo/Bar.kt")
@@ -580,5 +592,299 @@ func TestUnifiedRename_UnsupportedExtension(t *testing.T) {
 	_, err := Rename("/tmp/foo.rb", "Foo", "Bar", "/tmp")
 	if err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Errorf("expected unsupported error, got: %v", err)
+	}
+}
+
+// The two ways the delete warning used to be wrong, on one tree:
+//
+//	SamePackageUser  uses Doomed with no import   — was never examined
+//	RealUser         imports and uses Doomed      — correctly reported
+//	ImportOnly       imports but never uses it    — was wrongly reported
+func TestDelete_SurvivingRefsAreAccurate(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/ex/Doomed.java": `package com.ex;
+public class Doomed { public String hello() { return "hi"; } }
+`,
+		"src/main/java/com/ex/SamePackageUser.java": `package com.ex;
+public class SamePackageUser { public String go() { return new Doomed().hello(); } }
+`,
+		"src/main/java/com/other/RealUser.java": `package com.other;
+import com.ex.Doomed;
+public class RealUser { Doomed d = new Doomed(); }
+`,
+		"src/main/java/com/other/ImportOnly.java": `package com.other;
+import com.ex.Doomed;
+public class ImportOnly { int n = 1; }
+`,
+	})
+
+	_, refs, err := Delete(filepath.Join(root, "src/main/java/com/ex/Doomed.java"), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range refs {
+		got = append(got, filepath.Base(r))
+	}
+	want := map[string]bool{"SamePackageUser.java": true, "RealUser.java": true}
+	if len(got) != 2 {
+		t.Fatalf("refs = %v, want exactly SamePackageUser.java and RealUser.java", got)
+	}
+	for _, g := range got {
+		if !want[g] {
+			t.Errorf("unexpected file reported: %s (refs = %v)", g, got)
+		}
+	}
+}
+
+// A same-package user needs no import, so it was invisible to the old
+// import-driven check and delete broke the build with no warning at all.
+func TestDelete_SamePackageUserIsReported(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/ex/Doomed.java": `package com.ex;
+public class Doomed { public String hello() { return "hi"; } }
+`,
+		"src/main/java/com/ex/SamePackageUser.java": `package com.ex;
+public class SamePackageUser { public String go() { return new Doomed().hello(); } }
+`,
+	})
+	_, refs, err := Delete(filepath.Join(root, "src/main/java/com/ex/Doomed.java"), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 || filepath.Base(refs[0]) != "SamePackageUser.java" {
+		t.Errorf("refs = %v, want [SamePackageUser.java]", refs)
+	}
+}
+
+// A dependent whose import is merely cleaned needs no manual work.
+func TestDelete_ImportOnlyDependentIsNotReported(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/ex/Doomed.java": `package com.ex;
+public class Doomed { public String hello() { return "hi"; } }
+`,
+		"src/main/java/com/other/ImportOnly.java": `package com.other;
+import com.ex.Doomed;
+public class ImportOnly { int n = 1; }
+`,
+	})
+	_, refs, err := Delete(filepath.Join(root, "src/main/java/com/ex/Doomed.java"), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 0 {
+		t.Errorf("refs = %v, want none", refs)
+	}
+}
+
+// Delete must refuse to run when references survive, and say which files.
+func TestHandleDelete_RefusesWhenReferencesSurvive(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/ex/Doomed.java": `package com.ex;
+public class Doomed { public String hello() { return "hi"; } }
+`,
+		"src/main/java/com/ex/SamePackageUser.java": `package com.ex;
+public class SamePackageUser { public String go() { return new Doomed().hello(); } }
+`,
+	})
+	target := filepath.Join(root, "src/main/java/com/ex/Doomed.java")
+
+	var out bytes.Buffer
+	err := runDelete(t, &out, "in="+target, "root="+root)
+	if err == nil {
+		t.Fatal("expected delete to be refused")
+	}
+	if !strings.Contains(err.Error(), "force=true") {
+		t.Errorf("error should point at force=true, got: %v", err)
+	}
+	if !strings.Contains(out.String(), "SamePackageUser.java") {
+		t.Errorf("warning should name the referencing file, got:\n%s", out.String())
+	}
+	if _, statErr := os.Stat(target); statErr != nil {
+		t.Error("file was deleted despite the refusal")
+	}
+
+	// force=true goes through.
+	out.Reset()
+	if err := runDelete(t, &out, "in="+target, "root="+root, "force=true"); err != nil {
+		t.Fatalf("force=true should succeed: %v", err)
+	}
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Error("force=true did not delete the file")
+	}
+}
+
+func TestInPackage_DotBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		path, pkg string
+		want      bool
+	}{
+		{"javax.persistence", "javax.persistence", true},
+		{"javax.persistence.Entity", "javax.persistence", true},
+		{"javax.persistence.criteria.Root", "javax.persistence", true},
+		// The cases a naive search-and-replace gets wrong:
+		{"javax.sql.DataSource", "javax.persistence", false},
+		{"javax.persistencex.Foo", "javax.persistence", false},
+		{"javax.persistenceX", "javax.persistence", false},
+		{"com.javax.persistence.Foo", "javax.persistence", false},
+		{"javax", "javax.persistence", false},
+	} {
+		if got := inPackage(tc.path, tc.pkg); got != tc.want {
+			t.Errorf("inPackage(%q, %q) = %v, want %v", tc.path, tc.pkg, got, tc.want)
+		}
+	}
+}
+
+// The javax -> jakarta migration, including the JDK packages that share the
+// javax prefix and must not move.
+func TestRenamePackage_ExternalRewritesReferencesOnly(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/app/Order.java": `package com.app;
+
+import javax.persistence.Entity;
+import javax.persistence.criteria.Root;
+import javax.persistence.*;
+import static javax.persistence.CascadeType.ALL;
+import javax.sql.DataSource;
+
+@Entity
+public class Order {
+    private DataSource ds;
+    private javax.persistence.EntityManager em;
+    private javax.sql.rowset.CachedRowSet crs;
+    // javax.persistence in a comment
+    String s = "javax.persistence.Entity";
+}
+`,
+	})
+
+	set, err := RenamePackage("javax.persistence", "jakarta.persistence", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.Moves()) != 0 || len(set.Deletes()) != 0 {
+		t.Errorf("external rename must not move or delete files: %d moves, %d deletes",
+			len(set.Moves()), len(set.Deletes()))
+	}
+	if err := set.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, filepath.Join(root, "src/main/java/com/app/Order.java"))
+
+	for _, want := range []string{
+		"import jakarta.persistence.Entity;",
+		"import jakarta.persistence.criteria.Root;",
+		"import jakarta.persistence.*;",
+		"import static jakarta.persistence.CascadeType.ALL;",
+		"private jakarta.persistence.EntityManager em;",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing rewrite %q in:\n%s", want, got)
+		}
+	}
+	// JDK packages sharing the javax prefix must be untouched.
+	for _, keep := range []string{
+		"import javax.sql.DataSource;",
+		"private javax.sql.rowset.CachedRowSet crs;",
+		"// javax.persistence in a comment",
+		`String s = "javax.persistence.Entity";`,
+	} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("wrongly rewrote %q in:\n%s", keep, got)
+		}
+	}
+}
+
+func TestRenamePackage_ExternalErrorsWhenNoReferences(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle":                     "",
+		"src/main/java/com/app/Order.java": "package com.app;\npublic class Order {}\n",
+	})
+	_, err := RenamePackage("org.nowhere.absent", "org.other.absent", root)
+	if err == nil {
+		t.Fatal("expected an error when the package is neither owned nor referenced")
+	}
+	if !strings.Contains(err.Error(), "no references") {
+		t.Errorf("error should explain both cases, got: %v", err)
+	}
+}
+
+// A package the project DOES own must still be moved, not merely rewritten.
+func TestRenamePackage_OwnedPackageStillMovesFiles(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle":                    "",
+		"src/main/java/com/foo/Bar.java":  "package com.foo;\npublic class Bar {}\n",
+		"src/main/java/com/app/User.java": "package com.app;\nimport com.foo.Bar;\npublic class User { Bar b; }\n",
+	})
+	set, err := RenamePackage("com.foo", "com.baz", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.Moves()) == 0 {
+		t.Error("renaming an owned package must move its files")
+	}
+}
+
+// A package containing only annotation types used to fail with
+// "no types found in package".
+func TestRenamePackage_AnnotationOnlyPackage(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/om/annotations/Table.java": `package com.om.annotations;
+public @interface Table { String value(); }
+`,
+		"src/main/java/com/app/User.java": `package com.app;
+import com.om.annotations.Table;
+@Table("users")
+public class User {}
+`,
+	})
+	set, err := RenamePackage("com.om.annotations", "com.om.meta", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(read(t, filepath.Join(root, "src/main/java/com/app/User.java")), "import com.om.meta.Table;") {
+		t.Error("import in dependent not rewritten")
+	}
+	if _, err := os.Stat(filepath.Join(root, "src/main/java/com/om/meta/Table.java")); err != nil {
+		t.Errorf("annotation type not moved: %v", err)
+	}
+}
+
+func TestRename_AnnotationType(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"build.gradle":                    "",
+		"src/main/java/com/om/Table.java": "package com.om;\npublic @interface Table { String value(); }\n",
+		"src/main/java/com/app/User.java": "package com.app;\nimport com.om.Table;\n@Table(\"users\")\npublic class User {}\n",
+	})
+	set, err := Rename(filepath.Join(root, "src/main/java/com/om/Table.java"), "Table", "Entity", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	user := read(t, filepath.Join(root, "src/main/java/com/app/User.java"))
+	for _, want := range []string{"import com.om.Entity;", `@Entity("users")`} {
+		if !strings.Contains(user, want) {
+			t.Errorf("missing %q in:\n%s", want, user)
+		}
 	}
 }

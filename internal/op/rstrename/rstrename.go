@@ -9,6 +9,7 @@ import (
 
 	"github.com/serfom256/refactorio/internal/edit"
 	"github.com/serfom256/refactorio/internal/lang/rust"
+	"github.com/serfom256/refactorio/internal/op/refs"
 )
 
 type RenameRequest struct {
@@ -164,7 +165,7 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 
 	modPath := req.Index.FileToModulePath(req.File)
 	set := edit.NewSet()
-	var refs []string
+	var filesWithRefs []string
 
 	// Remove `use` statements referencing this module's symbols.
 	for _, path := range req.Index.AllFiles() {
@@ -172,15 +173,19 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 		if fileFE == nil || fileFE.Symbols == nil || path == req.File {
 			continue
 		}
-		removed := false
+		var spans []refs.Span
+		var bound, stillBound []string
 		for _, u := range fileFE.Symbols.Uses {
-			if strings.HasPrefix(u.Path, modPath+"::") || u.Path == modPath {
-				set.Add(edit.Edit{
-					File: path, Start: u.Range.Start, End: u.Range.End,
-					NewText: "", Why: "remove use for deleted module",
-				})
-				removed = true
+			if !strings.HasPrefix(u.Path, modPath+"::") && u.Path != modPath {
+				stillBound = append(stillBound, useBinding(u))
+				continue
 			}
+			set.Add(edit.Edit{
+				File: path, Start: u.Range.Start, End: u.Range.End,
+				NewText: "", Why: "remove use for deleted module",
+			})
+			spans = append(spans, refs.Span{Start: u.Range.Start, End: u.Range.End})
+			bound = append(bound, useBinding(u))
 		}
 		// Remove `mod` declarations for this module.
 		for _, md := range fileFE.Symbols.ModDecls {
@@ -213,13 +218,44 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 				}
 			}
 		}
-		if removed {
-			refs = append(refs, path)
+		if danglingRs(path, bound, stillBound, spans) {
+			filesWithRefs = append(filesWithRefs, path)
 		}
 	}
 
 	set.AddDelete(req.File, "delete file")
-	return &DeleteResult{Set: set, FilesWithReferences: refs}, nil
+	return &DeleteResult{Set: set, FilesWithReferences: filesWithRefs}, nil
+}
+
+// useBinding returns the local name a `use` introduces: the alias when there
+// is one, otherwise the last segment of the path.
+func useBinding(u rust.UseDecl) string {
+	if u.Alias != "" {
+		return u.Alias
+	}
+	if i := strings.LastIndex(u.Path, "::"); i >= 0 {
+		return u.Path[i+2:]
+	}
+	return u.Path
+}
+
+// danglingRs reports whether path still uses a name the removed `use`
+// statements bound.
+func danglingRs(path string, bound, stillBound []string, spans []refs.Span) bool {
+	if len(bound) == 0 {
+		return false
+	}
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var idents []refs.Ident
+	for _, tok := range rust.Tokenize(src) {
+		if tok.Kind == rust.TIdent {
+			idents = append(idents, refs.Ident{Name: tok.Text, Start: tok.Start})
+		}
+	}
+	return refs.Dangling(idents, bound, stillBound, spans)
 }
 
 func renameInFile(path, oldName, newName string, skipRange rust.Range, set *edit.Set) error {

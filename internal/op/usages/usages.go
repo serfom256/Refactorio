@@ -115,9 +115,9 @@ func Find(inFile, symbol, root string, rename RenameFn) (*Result, error) {
 
 // orderFindings groups by category:
 //
-//	1. Primary declaration (first one seen)
-//	2. Usages, sorted by file then line
-//	3. Additional declarations (overloads, etc.) at the bottom
+//  1. Primary declaration (first one seen)
+//  2. Usages, sorted by file then line
+//  3. Additional declarations (overloads, etc.) at the bottom
 func orderFindings(fs []Finding) []Finding {
 	var primary *Finding
 	var usages, overloads []Finding
@@ -215,21 +215,26 @@ func FormatText(w io.Writer, r *Result) error {
 		_, err := fmt.Fprintf(w, "no usages of %q found\n", r.Symbol)
 		return err
 	}
-	// Compute column widths.
+	// Locations are shown relative to the working directory, and the column
+	// is padded only to the widest of those — padding to absolute paths cost
+	// far more than it bought in readability.
+	cwd, _ := os.Getwd()
+	locs := make([]string, len(r.Findings))
 	maxLoc := 0
-	for _, f := range r.Findings {
-		loc := fmt.Sprintf("%s:%d:%d", f.File, f.Line, f.Column)
-		if len(loc) > maxLoc {
-			maxLoc = len(loc)
+	for i, f := range r.Findings {
+		locs[i] = fmt.Sprintf("%s:%d:%d", edit.RelTo(cwd, f.File), f.Line, f.Column)
+		if len(locs[i]) > maxLoc {
+			maxLoc = len(locs[i])
 		}
 	}
-	for _, f := range r.Findings {
-		loc := fmt.Sprintf("%s:%d:%d", f.File, f.Line, f.Column)
-		tag := ""
+	for i, f := range r.Findings {
+		// The category tag trails the source line, so plain usages — the
+		// overwhelming majority — pay nothing for the column.
+		line := strings.TrimSpace(f.Text)
 		if f.Category != CatUsage {
-			tag = fmt.Sprintf("(%s)", f.Category)
+			line = fmt.Sprintf("%s  (%s)", line, f.Category)
 		}
-		_, err := fmt.Fprintf(w, "%-*s  %-14s  %s\n", maxLoc, loc, tag, strings.TrimSpace(f.Text))
+		_, err := fmt.Fprintf(w, "%-*s  %s\n", maxLoc, locs[i], line)
 		if err != nil {
 			return err
 		}

@@ -6,17 +6,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/serfom256/refactorio/internal/edit"
 	"github.com/serfom256/refactorio/internal/index"
+	"github.com/serfom256/refactorio/internal/lang/csharp"
 	"github.com/serfom256/refactorio/internal/lang/golang"
 	"github.com/serfom256/refactorio/internal/lang/java"
 	"github.com/serfom256/refactorio/internal/lang/kotlin"
-	"github.com/serfom256/refactorio/internal/lang/typescript"
-	"github.com/serfom256/refactorio/internal/lang/csharp"
 	"github.com/serfom256/refactorio/internal/lang/python"
 	"github.com/serfom256/refactorio/internal/lang/rust"
+	"github.com/serfom256/refactorio/internal/lang/typescript"
 	"github.com/serfom256/refactorio/internal/op/csrename"
 	"github.com/serfom256/refactorio/internal/op/gorename"
 	"github.com/serfom256/refactorio/internal/op/ktrename"
@@ -27,6 +28,7 @@ import (
 	"github.com/serfom256/refactorio/internal/op/renamepkg"
 	"github.com/serfom256/refactorio/internal/op/rstrename"
 	"github.com/serfom256/refactorio/internal/op/tsrename"
+	"github.com/serfom256/refactorio/internal/op/usages"
 	"github.com/serfom256/refactorio/internal/project"
 )
 
@@ -133,9 +135,154 @@ func Move(inFile, toPath, root string) (*edit.Set, []string, error) {
 	return nil, nil, fmt.Errorf("unsupported file type: %s", filepath.Ext(inFile))
 }
 
-// Delete removes a file and cleans imports. Returns the edit set and
-// a list of files that still reference the deleted symbol.
+// Delete removes a file and cleans imports. Returns the edit set and the
+// files that still contain code references to the deleted symbols.
+//
+// The surviving-reference list is computed by the same machinery that backs
+// the usages command rather than by the per-language delete planners. Those
+// could only see files that imported the deleted one, which made the warning
+// wrong in both directions: a dependent whose import was merely cleaned got
+// reported, while a same-package user — which needs no import, and is the
+// commonest case in Java — was never examined at all, so delete could break
+// the build silently.
 func Delete(inFile, root string) (*edit.Set, []string, error) {
+	// Both the index and the usages findings are keyed by absolute path, so
+	// resolve once here rather than comparing a relative path against them.
+	inFile, _ = filepath.Abs(inFile)
+	set, _, err := planDelete(inFile, root)
+	if err != nil {
+		return nil, nil, err
+	}
+	return set, survivingRefs(inFile, root), nil
+}
+
+// survivingRefs lists files, other than the one being deleted, that still
+// reference a symbol it declares. Import statements do not count: the delete
+// removes them, and the usages layer already excludes them from findings.
+func survivingRefs(inFile, root string) []string {
+	names, err := declaredNames(inFile, root)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, name := range names {
+		res, err := usages.Find(inFile, name, root, Rename)
+		if err != nil {
+			continue
+		}
+		for _, f := range res.Findings {
+			if f.File == inFile || seen[f.File] {
+				continue
+			}
+			seen[f.File] = true
+			out = append(out, f.File)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// declaredNames returns the top-level symbols a file declares.
+func declaredNames(file, root string) ([]string, error) {
+	var names []string
+	switch detectLang(file) {
+	case "java":
+		_, idx, err := javaIndex(root, file)
+		if err != nil {
+			return nil, err
+		}
+		fe := idx.File(file)
+		if fe == nil || fe.Symbols == nil {
+			return nil, nil
+		}
+		for _, t := range fe.Symbols.Types {
+			names = append(names, t.Name)
+		}
+	case "kotlin":
+		p, err := detectProject(root, file)
+		if err != nil {
+			return nil, err
+		}
+		idx, err := ktrename.BuildIndex(p)
+		if err != nil {
+			return nil, err
+		}
+		fe := idx.File(file)
+		if fe == nil || fe.Symbols == nil {
+			return nil, nil
+		}
+		for _, d := range fe.Symbols.Declarations {
+			names = append(names, d.Name)
+		}
+	case "go":
+		idx, err := goIndex(root)
+		if err != nil {
+			return nil, err
+		}
+		fe := idx.File(file)
+		if fe == nil || fe.Symbols == nil {
+			return nil, nil
+		}
+		for _, d := range fe.Symbols.Declarations {
+			names = append(names, d.Name)
+		}
+	case "ts":
+		idx, err := tsIndex(root)
+		if err != nil {
+			return nil, err
+		}
+		fe := idx.File(file)
+		if fe == nil || fe.Symbols == nil {
+			return nil, nil
+		}
+		for _, d := range fe.Symbols.Declarations {
+			names = append(names, d.Name)
+		}
+	case "rust":
+		idx, err := rustIndex(root)
+		if err != nil {
+			return nil, err
+		}
+		fe := idx.File(file)
+		if fe == nil || fe.Symbols == nil {
+			return nil, nil
+		}
+		for _, d := range fe.Symbols.Declarations {
+			names = append(names, d.Name)
+		}
+	case "csharp":
+		idx, err := csharpIndex(root)
+		if err != nil {
+			return nil, err
+		}
+		fe := idx.File(file)
+		if fe == nil || fe.Symbols == nil {
+			return nil, nil
+		}
+		for _, t := range fe.Symbols.Types {
+			names = append(names, t.Name)
+		}
+	case "python":
+		idx, err := pythonIndex(root)
+		if err != nil {
+			return nil, err
+		}
+		fe := idx.File(file)
+		if fe == nil || fe.Symbols == nil {
+			return nil, nil
+		}
+		for _, d := range fe.Symbols.Declarations {
+			names = append(names, d.Name)
+		}
+	}
+	return names, nil
+}
+
+// planDelete builds the edit set for a delete. The second return value is the
+// per-language planner's own reference guess, which Delete discards in favour
+// of survivingRefs.
+func planDelete(inFile, root string) (*edit.Set, []string, error) {
 	inFile, _ = filepath.Abs(inFile)
 	lang := detectLang(inFile)
 
@@ -338,10 +485,10 @@ func moveJava(file, toFile, root string) (*edit.Set, []string, error) {
 // detectAccessWarnings flags Java package-private access that will
 // break when the file moves to a different package. Type-level only:
 //
-//   1. The moved file references a package-private type in its old
-//      package — that type won't be importable from the new package.
-//   2. The moved type itself is package-private and has dependents —
-//      it must become public to be imported after the move.
+//  1. The moved file references a package-private type in its old
+//     package — that type won't be importable from the new package.
+//  2. The moved type itself is package-private and has dependents —
+//     it must become public to be imported after the move.
 func detectAccessWarnings(file string, fe *index.FileEntry, idx *index.Index) []string {
 	var warnings []string
 	oldPkg := fe.Symbols.Package
@@ -798,7 +945,17 @@ func RenamePackage(from, to, root string) (*edit.Set, error) {
 				}
 			}
 		}
-		return nil, fmt.Errorf("no files found in package %q", from)
+		// The project owns no sources in this package, so this is a rename of
+		// an external one: a dependency's package, or javax.* -> jakarta.*.
+		// Rewrite the references and move nothing.
+		if p != nil {
+			set, refs, err := planExternalPackageRename(from, to, p)
+			if err == nil && refs > 0 {
+				return set, nil
+			}
+		}
+		return nil, fmt.Errorf("no files found in package %q, and no references to it either "+
+			"(a package with sources in the project is moved; one without is rewritten in place)", from)
 	}
 
 	// Go import path (contains /).

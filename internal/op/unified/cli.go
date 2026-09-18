@@ -10,6 +10,7 @@ import (
 	"github.com/serfom256/refactorio/internal/edit"
 	"github.com/serfom256/refactorio/internal/history"
 	"github.com/serfom256/refactorio/internal/op/usages"
+	"github.com/serfom256/refactorio/internal/stats"
 )
 
 func init() {
@@ -79,20 +80,26 @@ examples:
 		Name:    "delete",
 		Handler: HandleDelete,
 		Summary: "delete a file and remove its imports from dependents",
-		Usage:   "delete in=<file> [root=<dir>] [dry-run=true]",
+		Usage:   "delete in=<file> [root=<dir>] [dry-run=true] [force=true]",
 		Help: `Deletes a file and removes import statements referencing it.
 
 arguments:
   in=<file>     file to delete (required)
   root=<dir>    project root; defaults to the working directory
   dry-run=true  preview without writing
+  force=true    delete even though references survive (breaks the build)
 
 notes:
   - explicit and static imports / use statements are removed
   - mod declarations are removed (Rust)
   - wildcard imports are NOT removed (they cover the whole package)
-  - files that still contain CODE references are reported as a warning;
-    these need manual cleanup since there is nothing to replace them with
+  - files that still contain CODE references are listed by name, and the
+    delete is REFUSED unless force=true; there is nothing to replace such a
+    reference with, so it is a human decision
+  - same-package users are included even though they have no import to clean,
+    which is exactly the case a delete would otherwise break silently
+  - a dependent whose only mention was the import is not listed: removing
+    that import is the cleanup
 
 example:
   refactorio delete in=src/main/java/com/foo/Bar.java dry-run=true`,
@@ -101,10 +108,17 @@ example:
 	cli.RegisterCommand(cli.Command{
 		Name:    "rename-package",
 		Handler: HandleRenamePackage,
-		Summary: "rename a whole package and update all imports",
+		Summary: "rename a package — owned (moves files) or external (rewrites refs)",
 		Usage:   "rename-package from=<oldPkg> to=<newPkg> [root=<dir>] [dry-run=true]",
-		Help: `Renames every file in a package, moves them to the new directory,
-and rewrites imports in all dependents. Sub-packages are NOT affected.
+		Help: `Renames a package. The mode is chosen automatically:
+
+  owned     the package has sources in the project: every file is moved to the
+            new directory and imports are rewritten in dependents.
+            Sub-packages are NOT affected.
+  external  the package has no sources (javax.* -> jakarta.*, or swapping one
+            dependency's API for another): imports and inline fully-qualified
+            references are rewritten in place and NO file is moved, created or
+            deleted. Sub-packages ARE included. Java and Kotlin only.
 
 arguments:
   from=<oldPkg>  existing package (dotted for Java/Kotlin, import path for Go)
@@ -114,10 +128,17 @@ arguments:
 
 examples:
   refactorio rename-package from=com.foo to=com.bar
+  refactorio rename-package from=javax.persistence to=jakarta.persistence
   refactorio rename-package from=example.com/proj/pkg to=example.com/proj/lib
 
-note: TypeScript/JavaScript and Rust have no package-rename equivalent —
-use 'move' for individual files.`,
+notes:
+  - external matching is on dot boundaries, so renaming javax.persistence
+    rewrites javax.persistence.criteria but never javax.sql or
+    javax.persistencex; strings and comments are never touched
+  - external mode cannot see persistence.xml, web.xml, build coordinates or
+    class names inside config strings — a clean run is not a finished migration
+  - TypeScript/JavaScript and Rust have no package-rename equivalent —
+    use 'move' for individual files.`,
 	})
 
 	cli.RegisterCommand(cli.Command{
@@ -232,6 +253,9 @@ func HandleUsages(args *cli.Args, stdout, stderr io.Writer) error {
 		return fmt.Errorf("unknown arguments: %v", unknown)
 	}
 
+	// usages is read-only, so it records language and outcome but no lines.
+	stats.NoteContext(detectLang(inFile), false)
+
 	result, err := usages.Find(inFile, name, rootArg, Rename)
 	if err != nil {
 		return err
@@ -300,10 +324,13 @@ func HandleRename(args *cli.Args, stdout, stderr io.Writer) error {
 		return fmt.Errorf("unknown arguments: %v", unknown)
 	}
 
+	stats.NoteContext(detectLang(inFile), dryRun)
+
 	set, err := Rename(inFile, name, to, rootArg)
 	if err != nil {
 		return err
 	}
+	stats.Note(set.Measure())
 	if dryRun {
 		out, err := set.DryRun()
 		if err != nil {
@@ -338,10 +365,13 @@ func HandleMove(args *cli.Args, stdout, stderr io.Writer) error {
 		return fmt.Errorf("unknown arguments: %v", unknown)
 	}
 
+	stats.NoteContext(detectLang(inFile), dryRun)
+
 	set, warnings, err := Move(inFile, to, rootArg)
 	if err != nil {
 		return err
 	}
+	stats.Note(set.Measure())
 	printWarnings(stdout, warnings)
 	if dryRun {
 		out, err := set.DryRun()
@@ -380,33 +410,41 @@ func HandleDelete(args *cli.Args, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	force, err := args.Bool("force", false)
+	if err != nil {
+		return err
+	}
 	rootArg, _ := args.Get("root")
-	if unknown := args.Unknown("in", "root", "dry-run"); len(unknown) > 0 {
+	if unknown := args.Unknown("in", "root", "dry-run", "force"); len(unknown) > 0 {
 		return fmt.Errorf("unknown arguments: %v", unknown)
 	}
+
+	stats.NoteContext(detectLang(inFile), dryRun)
 
 	set, refs, err := Delete(inFile, rootArg)
 	if err != nil {
 		return err
 	}
+	stats.Note(set.Measure())
 	if dryRun {
 		out, err := set.DryRun()
 		if err != nil {
 			return err
 		}
 		_, _ = io.WriteString(stdout, out)
-		if len(refs) > 0 {
-			fmt.Fprintf(stdout, "\nwarning: %d files still reference the deleted file\n", len(refs))
-		}
+		printSurvivingRefs(stdout, refs)
 		return nil
+	}
+	// Deleting a file that is still referenced leaves the project unable to
+	// compile. Refuse by default rather than reporting it after the fact.
+	if len(refs) > 0 && !force {
+		printSurvivingRefs(stdout, refs)
+		return fmt.Errorf("refusing to delete: %d file(s) still reference it — fix those, or re-run with force=true", len(refs))
 	}
 	if err := applyWithHistory(set, args, stdout); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "deleted, cleaned %d files\n", set.Len())
-	if len(refs) > 0 {
-		fmt.Fprintf(stdout, "warning: %d files still reference the deleted file\n", len(refs))
-	}
 	return nil
 }
 
@@ -429,10 +467,13 @@ func HandleRenamePackage(args *cli.Args, stdout, stderr io.Writer) error {
 		return fmt.Errorf("unknown arguments: %v", unknown)
 	}
 
+	stats.NoteContext("", dryRun)
+
 	set, err := RenamePackage(from, to, rootArg)
 	if err != nil {
 		return err
 	}
+	stats.Note(set.Measure())
 	if dryRun {
 		out, err := set.DryRun()
 		if err != nil {
@@ -447,4 +488,22 @@ func HandleRenamePackage(args *cli.Args, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "%d files modified, %d edits, %d moves\n",
 		len(set.Files()), set.Len(), len(set.Moves()))
 	return nil
+}
+
+// printSurvivingRefs reports the files that still reference a deleted symbol.
+// Naming them matters: the warning is a to-do list for manual cleanup, and a
+// bare count gives the reader no way to check it or act on it.
+func printSurvivingRefs(w io.Writer, refs []string) {
+	if len(refs) == 0 {
+		return
+	}
+	cwd, _ := os.Getwd()
+	subject := "files still reference"
+	if len(refs) == 1 {
+		subject = "file still references"
+	}
+	fmt.Fprintf(w, "\nwarning: %d %s the deleted symbol and will not compile:\n", len(refs), subject)
+	for _, r := range refs {
+		fmt.Fprintf(w, "  %s\n", edit.RelTo(cwd, r))
+	}
 }

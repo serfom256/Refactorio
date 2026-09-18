@@ -263,3 +263,39 @@ func TestMove_SameFile(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+// A dependent whose import of the deleted file is removed, and which never
+// used the binding, needs no manual cleanup — it must not be reported.
+func TestPlanDelete_DeadImportOnlyIsNotReported(t *testing.T) {
+	idx, root := mk(t, map[string]string{
+		"src/foo.ts":  "export class Foo {}\n",
+		"src/dead.ts": "import { Foo } from './foo';\nexport const n = 1;\n",
+		"src/live.ts": "import { Foo } from './foo';\nexport const f = new Foo();\n",
+	})
+	res, err := PlanDelete(DeleteRequest{File: filepath.Join(root, "src/foo.ts"), Index: idx})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range res.FilesWithReferences {
+		got = append(got, filepath.Base(p))
+	}
+	if len(got) != 1 || got[0] != "live.ts" {
+		t.Errorf("FilesWithReferences = %v, want only [live.ts]", got)
+	}
+}
+
+// The name left dangling by `import { Foo as F }` is F, not Foo.
+func TestPlanDelete_TracksAliasedBinding(t *testing.T) {
+	idx, root := mk(t, map[string]string{
+		"src/foo.ts":  "export class Foo {}\n",
+		"src/user.ts": "import { Foo as F } from './foo';\nexport const x = new F();\n",
+	})
+	res, err := PlanDelete(DeleteRequest{File: filepath.Join(root, "src/foo.ts"), Index: idx})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.FilesWithReferences) != 1 {
+		t.Errorf("aliased usage not detected: %v", res.FilesWithReferences)
+	}
+}

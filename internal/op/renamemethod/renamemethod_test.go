@@ -334,3 +334,102 @@ public class Bar {
 		t.Errorf("rename incomplete:\n%s", got)
 	}
 }
+
+// Method references have neither a '.' nor a '(' after the name, so the call
+// scanner used to skip them all and leave the code pointing at a method that
+// no longer existed.
+func TestRenameMethod_MethodReferences(t *testing.T) {
+	files := map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/foo/Bar.java": `package com.foo;
+import java.util.function.Function;
+public class Bar {
+    public String build(String s) { return s; }
+    public static String make(String s) { return s; }
+    public Function<String, String> self() { return this::build; }
+}
+`,
+		"src/main/java/com/app/User.java": `package com.app;
+import com.foo.Bar;
+import java.util.List;
+public class User {
+    Bar bar = new Bar();
+    void go(List<String> xs) {
+        xs.stream().map(bar::build);
+        xs.stream().map(Bar::make);
+    }
+}
+`,
+	}
+	// Each rename gets a fresh tree: an index holds byte offsets, so reusing
+	// one after applying an edit would plan against stale positions.
+	for _, tc := range []struct {
+		method, newName string
+		want            map[string]string // file -> expected fragment
+	}{
+		{"build", "compile", map[string]string{
+			"src/main/java/com/foo/Bar.java":  "return this::compile;",
+			"src/main/java/com/app/User.java": "map(bar::compile)",
+		}},
+		{"make", "create", map[string]string{
+			"src/main/java/com/app/User.java": "map(Bar::create)",
+		}},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			idx, root := mk(t, files)
+			set, err := Plan(Request{ClassFQN: "com.foo.Bar", Method: tc.method, NewName: tc.newName, Index: idx})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := set.Apply(); err != nil {
+				t.Fatal(err)
+			}
+			for rel, frag := range tc.want {
+				if got := read(t, filepath.Join(root, rel)); !strings.Contains(got, frag) {
+					t.Errorf("missing %q in %s:\n%s", frag, rel, got)
+				}
+			}
+		})
+	}
+}
+
+// A reference through a variable typed as a different class is a different
+// method and must be left alone — the same rule as for ordinary calls.
+func TestRenameMethod_MethodReferenceOnOtherTypeUntouched(t *testing.T) {
+	idx, root := mk(t, map[string]string{
+		"build.gradle": "",
+		"src/main/java/com/foo/Bar.java": `package com.foo;
+public class Bar { public String build(String s) { return s; } }
+`,
+		"src/main/java/com/foo/Other.java": `package com.foo;
+public class Other { public String build(String s) { return s; } }
+`,
+		"src/main/java/com/app/User.java": `package com.app;
+import com.foo.Bar;
+import com.foo.Other;
+import java.util.List;
+public class User {
+    Bar bar = new Bar();
+    Other other = new Other();
+    void go(List<String> xs) {
+        xs.stream().map(bar::build);
+        xs.stream().map(other::build);
+    }
+}
+`,
+	})
+	set, err := Plan(Request{ClassFQN: "com.foo.Bar", Method: "build", NewName: "compile", Index: idx})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	user := read(t, filepath.Join(root, "src/main/java/com/app/User.java"))
+	if !strings.Contains(user, "map(bar::compile)") {
+		t.Errorf("Bar reference not renamed:\n%s", user)
+	}
+	if !strings.Contains(user, "map(other::build)") {
+		t.Errorf("Other reference wrongly renamed:\n%s", user)
+	}
+}

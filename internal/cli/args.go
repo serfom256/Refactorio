@@ -90,6 +90,17 @@ func (a *Args) Bool(key string, def bool) (bool, error) {
 	}
 }
 
+// Keys returns the argument names that were supplied, in order and without
+// their values. Statistics record which options get used without recording
+// what they were pointed at.
+func (a *Args) Keys() []string {
+	out := make([]string, len(a.pairs))
+	for i, p := range a.pairs {
+		out[i] = p.key
+	}
+	return out
+}
+
 // RawPairs returns all key=value pairs as strings for display.
 func (a *Args) RawPairs() []string {
 	out := make([]string, len(a.pairs))

@@ -37,7 +37,7 @@ func read(t *testing.T, p string) string {
 func TestRename_Struct(t *testing.T) {
 	idx, root := mk(t, map[string]string{
 		"Cargo.toml": "[package]\nname = \"myproj\"\nversion = \"0.1.0\"\n",
-		"src/lib.rs":  "pub mod foo;\n",
+		"src/lib.rs": "pub mod foo;\n",
 		"src/foo.rs": `pub struct Bar { pub x: i32 }
 
 impl Bar {
@@ -167,7 +167,7 @@ func TestRename_NotFound(t *testing.T) {
 
 func TestDelete_RemovesFileAndUseStatements(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"Cargo.toml": "[package]\nname = \"myproj\"\n",
+		"Cargo.toml":  "[package]\nname = \"myproj\"\n",
 		"src/lib.rs":  "pub mod foo;\n",
 		"src/foo.rs":  "pub fn greet() {}\n",
 		"src/main.rs": "use myproj::foo::greet;\nfn main() { greet(); }\n",
@@ -182,5 +182,45 @@ func TestDelete_RemovesFileAndUseStatements(t *testing.T) {
 	}
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
 		t.Errorf("file still exists")
+	}
+}
+
+// A file whose `use` of the deleted module is removed, and which never used
+// the binding, needs no manual cleanup.
+func TestPlanDelete_DeadUseOnlyIsNotReported(t *testing.T) {
+	idx, root := mk(t, map[string]string{
+		"Cargo.toml":  "[package]\nname = \"myproj\"\n",
+		"src/lib.rs":  "pub mod foo;\npub mod dead;\npub mod live;\n",
+		"src/foo.rs":  "pub fn greet() {}\n",
+		"src/dead.rs": "use crate::foo::greet;\npub const N: i32 = 1;\n",
+		"src/live.rs": "use crate::foo::greet;\npub fn go() { greet(); }\n",
+	})
+	r, err := PlanDelete(DeleteRequest{File: filepath.Join(root, "src/foo.rs"), Index: idx})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range r.FilesWithReferences {
+		got = append(got, filepath.Base(p))
+	}
+	if len(got) != 1 || got[0] != "live.rs" {
+		t.Errorf("FilesWithReferences = %v, want only [live.rs]", got)
+	}
+}
+
+// `use crate::foo::greet as g` leaves g dangling, not greet.
+func TestPlanDelete_TracksAliasedUse(t *testing.T) {
+	idx, root := mk(t, map[string]string{
+		"Cargo.toml":  "[package]\nname = \"myproj\"\n",
+		"src/lib.rs":  "pub mod foo;\npub mod user;\n",
+		"src/foo.rs":  "pub fn greet() {}\n",
+		"src/user.rs": "use crate::foo::greet as g;\npub fn go() { g(); }\n",
+	})
+	r, err := PlanDelete(DeleteRequest{File: filepath.Join(root, "src/foo.rs"), Index: idx})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.FilesWithReferences) != 1 {
+		t.Errorf("aliased use not detected: %v", r.FilesWithReferences)
 	}
 }

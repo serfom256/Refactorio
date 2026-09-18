@@ -232,3 +232,47 @@ func memberNames(ms []MemberDecl) []string {
 	}
 	return out
 }
+
+// An annotation type declaration must be indexed as a type. The top-level
+// loop used to read `@interface` as a use of an annotation named "interface"
+// and skip it, so annotation-only packages looked empty.
+func TestExtractSymbols_AnnotationTypeDeclaration(t *testing.T) {
+	for name, src := range map[string]string{
+		"public, preceded by meta-annotations": `package com.x;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+@Retention(RetentionPolicy.RUNTIME)
+public @interface Table { String value(); }
+`,
+		"package-private": "package com.x;\n@interface Marker {}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			fs, err := ExtractSymbols([]byte(src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(fs.Types) != 1 {
+				t.Fatalf("got %d types, want 1: %+v", len(fs.Types), fs.Types)
+			}
+			if fs.Types[0].Kind != "annotation" {
+				t.Errorf("Kind = %q, want annotation", fs.Types[0].Kind)
+			}
+		})
+	}
+}
+
+// Ordinary annotations on a class must still be skipped as usages, not
+// mistaken for declarations.
+func TestExtractSymbols_AnnotatedClassIsStillAClass(t *testing.T) {
+	src := "package com.x;\n@Deprecated\n@SuppressWarnings(\"all\")\npublic class Foo {}\n"
+	fs, err := ExtractSymbols([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.Types) != 1 || fs.Types[0].Name != "Foo" || fs.Types[0].Kind != "class" {
+		t.Errorf("got %+v, want one class Foo", fs.Types)
+	}
+	if !fs.Types[0].IsPublic {
+		t.Error("public modifier lost across the annotations")
+	}
+}

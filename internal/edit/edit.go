@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 // Edit is a single byte-range replacement within a file.
@@ -185,6 +187,12 @@ func (s *Set) Apply() error {
 
 // DryRun returns a human-readable summary of what Apply would do, without
 // touching the filesystem.
+//
+// The output is deliberately terse, because it is usually read by a tool or
+// an agent rather than scrolled by a human: paths are shown relative to the
+// working directory, each file is named once for its whole group instead of
+// once per edit, and edits sharing a replacement and reason collapse onto a
+// single line listing the line numbers they occur on.
 func (s *Set) DryRun() (string, error) {
 	if err := s.Validate(); err != nil {
 		return "", err
@@ -194,29 +202,127 @@ func (s *Set) DryRun() (string, error) {
 	if len(files) == 0 && len(s.moves) == 0 && len(s.deletes) == 0 {
 		return "no changes\n", nil
 	}
+	cwd, _ := os.Getwd()
 	var b []byte
-	b = append(b, fmt.Sprintf("%d files would be modified, %d edits, %d moves\n", len(files), s.Len(), len(s.moves))...)
+	b = append(b, fmt.Sprintf("%d files, %d edits, %d moves, %d deletes\n",
+		len(files), s.Len(), len(s.moves), len(s.deletes))...)
 	for _, f := range files {
 		es := groups[f]
-		b = append(b, fmt.Sprintf("  %s (%d edits)\n", f, len(es))...)
-		// Read once to compute line numbers for nicer output.
+		b = append(b, fmt.Sprintf("  %s (%s)\n", RelTo(cwd, f), plural(len(es), "edit"))...)
 		src, err := os.ReadFile(f)
 		if err != nil {
 			return "", err
 		}
-		for _, e := range es {
-			line := lineOf(src, e.Start)
-			old := safeSlice(src, e.Start, e.End)
-			b = append(b, fmt.Sprintf("    %s:%d  %q -> %q  %s\n", f, line, old, e.NewText, e.Why)...)
+		for _, g := range groupEdits(src, es) {
+			b = append(b, fmt.Sprintf("    %s  %q -> %q  %s\n",
+				formatLines(g.lines), g.old, g.newText, g.why)...)
 		}
 	}
 	for _, m := range s.moves {
-		b = append(b, fmt.Sprintf("  move %s -> %s  %s\n", m.From, m.To, m.Why)...)
+		b = append(b, fmt.Sprintf("  move %s -> %s  %s\n", RelTo(cwd, m.From), RelTo(cwd, m.To), m.Why)...)
 	}
 	for _, d := range s.deletes {
-		b = append(b, fmt.Sprintf("  delete %s  %s\n", d.Path, d.Why)...)
+		b = append(b, fmt.Sprintf("  delete %s  %s\n", RelTo(cwd, d.Path), d.Why)...)
 	}
 	return string(b), nil
+}
+
+// editGroup is a run of edits within one file that share the same original
+// text, replacement and reason, and so can be reported as one line list.
+type editGroup struct {
+	lines   []int
+	old     string
+	newText string
+	why     string
+}
+
+// groupEdits collapses edits with an identical (old, new, why) triple into a
+// single group, keeping the order in which each distinct triple first appears.
+func groupEdits(src []byte, es []Edit) []editGroup {
+	starts := lineStarts(src)
+	var out []editGroup
+	idx := map[string]int{}
+	for _, e := range es {
+		old := safeSlice(src, e.Start, e.End)
+		key := old + "\x00" + e.NewText + "\x00" + e.Why
+		i, ok := idx[key]
+		if !ok {
+			i = len(out)
+			idx[key] = i
+			out = append(out, editGroup{old: old, newText: e.NewText, why: e.Why})
+		}
+		out[i].lines = append(out[i].lines, lineAt(starts, e.Start))
+	}
+	for i := range out {
+		sort.Ints(out[i].lines)
+	}
+	return out
+}
+
+// lineStarts records the byte offset at which each line begins, so that line
+// numbers can be resolved by binary search rather than by rescanning the file
+// from the top for every edit.
+func lineStarts(src []byte) []int {
+	starts := []int{0}
+	for i, c := range src {
+		if c == '\n' {
+			starts = append(starts, i+1)
+		}
+	}
+	return starts
+}
+
+// lineAt returns the 1-based number of the line containing off.
+func lineAt(starts []int, off int) int {
+	i := sort.SearchInts(starts, off)
+	if i < len(starts) && starts[i] == off {
+		return i + 1
+	}
+	return i
+}
+
+// formatLines renders a sorted line list, collapsing repeats so that two
+// edits on the same line read as "5(2)" rather than an ambiguous "5,5".
+func formatLines(ns []int) string {
+	var b strings.Builder
+	for i := 0; i < len(ns); {
+		j := i
+		for j < len(ns) && ns[j] == ns[i] {
+			j++
+		}
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.Itoa(ns[i]))
+		if n := j - i; n > 1 {
+			b.WriteByte('(')
+			b.WriteString(strconv.Itoa(n))
+			b.WriteByte(')')
+		}
+		i = j
+	}
+	return b.String()
+}
+
+// RelTo shortens p for display when it lies under base. Paths outside base
+// are left alone, so the output is never ambiguous. Reporting commands share
+// this so every path Refactorio prints is relative to the working directory.
+func RelTo(base, p string) string {
+	if base == "" || !filepath.IsAbs(p) {
+		return p
+	}
+	rel, err := filepath.Rel(base, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return p
+	}
+	return rel
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, word)
+	}
+	return fmt.Sprintf("%d %ss", n, word)
 }
 
 func (s *Set) groupByFile() map[string][]Edit {
@@ -273,19 +379,6 @@ func writeAtomic(path string, data []byte) error {
 	return nil
 }
 
-func lineOf(src []byte, off int) int {
-	if off > len(src) {
-		off = len(src)
-	}
-	line := 1
-	for i := 0; i < off; i++ {
-		if src[i] == '\n' {
-			line++
-		}
-	}
-	return line
-}
-
 func safeSlice(src []byte, start, end int) string {
 	if start < 0 {
 		start = 0
@@ -297,4 +390,71 @@ func safeSlice(src []byte, start, end int) string {
 		return ""
 	}
 	return string(src[start:end])
+}
+
+// Metrics summarises how much code a Set changes. LinesChanged is the
+// headline number: how many distinct source lines the refactor rewrote,
+// which is a fairer measure of work done than the raw edit count (a rename
+// often lands several edits on one line).
+type Metrics struct {
+	Files        int
+	Edits        int
+	LinesChanged int
+	Moves        int
+	LinesMoved   int
+	Deletes      int
+	LinesDeleted int
+}
+
+// Measure computes the Metrics for this Set.
+//
+// It must be called BEFORE Apply: it reads files as they are on disk now, and
+// Apply rewrites, moves and removes them. Files that cannot be read are
+// skipped rather than reported as an error — metrics are for statistics, and
+// must never be the reason a refactor fails.
+func (s *Set) Measure() Metrics {
+	m := Metrics{
+		Edits:   s.Len(),
+		Moves:   len(s.moves),
+		Deletes: len(s.deletes),
+	}
+	for f, es := range s.groupByFile() {
+		m.Files++
+		src, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		starts := lineStarts(src)
+		seen := map[int]bool{}
+		for _, e := range es {
+			seen[lineAt(starts, e.Start)] = true
+		}
+		m.LinesChanged += len(seen)
+	}
+	for _, mv := range s.moves {
+		m.LinesMoved += countLines(mv.From)
+	}
+	for _, d := range s.deletes {
+		m.LinesDeleted += countLines(d.Path)
+	}
+	return m
+}
+
+// countLines returns the number of lines in a file, or 0 if unreadable.
+// A trailing newline does not count as an extra line.
+func countLines(path string) int {
+	src, err := os.ReadFile(path)
+	if err != nil || len(src) == 0 {
+		return 0
+	}
+	n := 0
+	for _, c := range src {
+		if c == '\n' {
+			n++
+		}
+	}
+	if src[len(src)-1] != '\n' {
+		n++
+	}
+	return n
 }

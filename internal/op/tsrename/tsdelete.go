@@ -2,10 +2,12 @@ package tsrename
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/serfom256/refactorio/internal/edit"
 	"github.com/serfom256/refactorio/internal/lang/typescript"
+	"github.com/serfom256/refactorio/internal/op/refs"
 )
 
 // DeleteRequest removes a TS/JS file and cleans import statements
@@ -30,30 +32,58 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 	}
 
 	set := edit.NewSet()
-	var refs []string
+	var filesWithRefs []string
 
 	for _, path := range req.Index.FilesImporting(req.File) {
 		impFE := req.Index.File(path)
 		if impFE == nil || impFE.Symbols == nil {
 			continue
 		}
-		removed := false
+		var spans []refs.Span
+		var bound, stillBound []string
 		for _, imp := range impFE.Symbols.Imports {
 			resolved := typescript.ResolveImportPath(imp.Path, path)
-			if resolved == req.File {
-				set.Add(edit.Edit{
-					File: path, Start: imp.Range.Start, End: imp.Range.End,
-					NewText: "", Why: fmt.Sprintf("remove import for deleted file"),
-				})
-				removed = true
+			if resolved != req.File {
+				// A binding from a module we are keeping, so it stays live
+				// even if the deleted module bound the same local name.
+				for _, n := range imp.Names {
+					stillBound = append(stillBound, n.LocalName())
+				}
+				continue
+			}
+			set.Add(edit.Edit{
+				File: path, Start: imp.Range.Start, End: imp.Range.End,
+				NewText: "", Why: "remove import for deleted file",
+			})
+			spans = append(spans, refs.Span{Start: imp.Range.Start, End: imp.Range.End})
+			for _, n := range imp.Names {
+				bound = append(bound, n.LocalName())
 			}
 		}
-		if removed {
-			refs = append(refs, path)
+		if danglingTS(path, bound, stillBound, spans) {
+			filesWithRefs = append(filesWithRefs, path)
 		}
 	}
 
 	set.AddDelete(req.File, fmt.Sprintf("delete %s", filepath.Base(req.File)))
-	return &DeleteResult{Set: set, FilesWithReferences: refs}, nil
+	return &DeleteResult{Set: set, FilesWithReferences: filesWithRefs}, nil
 }
 
+// danglingTS reports whether path still uses a binding that the removed
+// imports provided.
+func danglingTS(path string, bound, stillBound []string, spans []refs.Span) bool {
+	if len(bound) == 0 {
+		return false
+	}
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var idents []refs.Ident
+	for _, tok := range typescript.Tokenize(src) {
+		if tok.Kind == typescript.TIdent {
+			idents = append(idents, refs.Ident{Name: tok.Text, Start: tok.Start})
+		}
+	}
+	return refs.Dangling(idents, bound, stillBound, spans)
+}

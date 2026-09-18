@@ -112,17 +112,17 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 		if depFE == nil || depFE.Symbols == nil {
 			continue
 		}
-		removed := false
 		for _, imp := range depFE.Symbols.Imports {
 			if imp.Path == req.FQN {
 				set.Add(edit.Edit{
 					File: path, Start: imp.Range.Start, End: imp.Range.End,
 					NewText: "", Why: fmt.Sprintf("remove import for deleted %s", target.Name),
 				})
-				removed = true
 			}
 		}
-		if removed || hasCodeRef(path, target.Name) {
+		// Removing the import is the cleanup, not evidence that cleanup is
+		// still needed, so it deliberately does not feed into refs.
+		if hasCodeRef(path, depFE.Symbols.Imports, target.Name) {
 			refs = append(refs, path)
 		}
 	}
@@ -217,13 +217,27 @@ func PlanRenamePackage(req RenamePackageRequest) (*edit.Set, error) {
 	return set, nil
 }
 
-func hasCodeRef(path, name string) bool {
+// hasCodeRef reports whether the file still references name in code once the
+// imports naming it have been removed. Identifiers inside import statements
+// are skipped: those ranges are already queued for deletion, so counting them
+// reported every file whose import had just been cleaned.
+func hasCodeRef(path string, imports []kotlin.ImportSpec, name string) bool {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
 	for _, tok := range kotlin.Tokenize(src) {
-		if tok.Kind == kotlin.TIdent && tok.Text == name {
+		if tok.Kind != kotlin.TIdent || tok.Text != name {
+			continue
+		}
+		inImport := false
+		for _, imp := range imports {
+			if tok.Start >= imp.Range.Start && tok.Start < imp.Range.End {
+				inImport = true
+				break
+			}
+		}
+		if !inImport {
 			return true
 		}
 	}

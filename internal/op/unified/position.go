@@ -29,17 +29,20 @@ package unified
 type tokenContext int
 
 const (
-	ctxUnknown  tokenContext = iota
-	ctxType                  // type position (new X, extends X, : X, etc.)
-	ctxCall                  // followed by (
-	ctxField                 // after . not followed by (
-	ctxLocalDecl             // local variable declaration
-	ctxDecl                  // the declaration itself (class/func/type keyword before it)
+	ctxUnknown   tokenContext = iota
+	ctxType                   // type position (new X, extends X, : X, etc.)
+	ctxCall                   // followed by (
+	ctxField                  // after . not followed by (
+	ctxLocalDecl              // local variable declaration
+	ctxDecl                   // the declaration itself (class/func/type keyword before it)
 )
 
 // classifyToken determines the context of token at index i.
 // Works across all languages — uses generic punctuation/keyword patterns.
-func classifyToken(tokens interface{ Len() int; Get(int) tokenInfo }, i int) tokenContext {
+func classifyToken(tokens interface {
+	Len() int
+	Get(int) tokenInfo
+}, i int) tokenContext {
 	if i < 0 || i >= tokens.Len() {
 		return ctxUnknown
 	}
@@ -112,7 +115,10 @@ type tokenList struct {
 func (tl *tokenList) Len() int            { return len(tl.infos) }
 func (tl *tokenList) Get(i int) tokenInfo { return tl.infos[i] }
 
-func nextNonCommentInfo(tokens interface{ Len() int; Get(int) tokenInfo }, from int) *tokenInfo {
+func nextNonCommentInfo(tokens interface {
+	Len() int
+	Get(int) tokenInfo
+}, from int) *tokenInfo {
 	for from < tokens.Len() {
 		t := tokens.Get(from)
 		if !t.isComment {
@@ -123,7 +129,10 @@ func nextNonCommentInfo(tokens interface{ Len() int; Get(int) tokenInfo }, from 
 	return nil
 }
 
-func prevNonCommentInfo(tokens interface{ Len() int; Get(int) tokenInfo }, from int) *tokenInfo {
+func prevNonCommentInfo(tokens interface {
+	Len() int
+	Get(int) tokenInfo
+}, from int) *tokenInfo {
 	for from >= 0 {
 		t := tokens.Get(from)
 		if !t.isComment {

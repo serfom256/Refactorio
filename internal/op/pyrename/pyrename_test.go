@@ -244,9 +244,9 @@ func TestRename_NotFound(t *testing.T) {
 
 func TestMove_UpdatesImporters(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"utils/foo.py":    "class Foo:\n    pass\n",
+		"utils/foo.py":      "class Foo:\n    pass\n",
 		"utils/__init__.py": "",
-		"main.py":         "from utils.foo import Foo\nx = Foo()\n",
+		"main.py":           "from utils.foo import Foo\nx = Foo()\n",
 	})
 	from := filepath.Join(root, "utils/foo.py")
 	to := filepath.Join(root, "lib/foo.py")
@@ -285,5 +285,41 @@ func TestDelete_RemovesFileAndImports(t *testing.T) {
 	main := read(t, filepath.Join(root, "main.py"))
 	if strings.Contains(main, "from foo import") {
 		t.Errorf("import not removed:\n%s", main)
+	}
+}
+
+// A module whose only mention of the deleted module is the import being
+// removed needs no manual cleanup.
+func TestPlanDelete_DeadImportOnlyIsNotReported(t *testing.T) {
+	idx, root := mk(t, map[string]string{
+		"foo.py":  "class Foo:\n    pass\n",
+		"dead.py": "from foo import Foo\nn = 1\n",
+		"live.py": "from foo import Foo\nx = Foo()\n",
+	})
+	r, err := PlanDelete(DeleteRequest{File: filepath.Join(root, "foo.py"), Index: idx})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range r.FilesWithReferences {
+		got = append(got, filepath.Base(p))
+	}
+	if len(got) != 1 || got[0] != "live.py" {
+		t.Errorf("FilesWithReferences = %v, want only [live.py]", got)
+	}
+}
+
+// `from foo import Foo as F` leaves F dangling, not Foo.
+func TestPlanDelete_TracksAliasedBinding(t *testing.T) {
+	idx, root := mk(t, map[string]string{
+		"foo.py":  "class Foo:\n    pass\n",
+		"user.py": "from foo import Foo as F\nx = F()\n",
+	})
+	r, err := PlanDelete(DeleteRequest{File: filepath.Join(root, "foo.py"), Index: idx})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.FilesWithReferences) != 1 {
+		t.Errorf("aliased usage not detected: %v", r.FilesWithReferences)
 	}
 }
