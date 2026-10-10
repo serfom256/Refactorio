@@ -201,10 +201,11 @@ func (p *rsParser) parseUse() []UseDecl {
 }
 
 // collectUsePaths handles simple and grouped use paths recursively.
-//   use foo::Bar;           → "foo::Bar"
-//   use foo::{Bar, Baz};    → "foo::Bar", "foo::Baz"
-//   use foo::Bar as B;      → "foo::Bar" alias "B"
-//   use foo::*;             → "foo::*"
+//
+//	use foo::Bar;           → "foo::Bar"
+//	use foo::{Bar, Baz};    → "foo::Bar", "foo::Baz"
+//	use foo::Bar as B;      → "foo::Bar" alias "B"
+//	use foo::*;             → "foo::*"
 func (p *rsParser) collectUsePaths(prefix string, stmtStart, stmtLine int, out *[]UseDecl) {
 	p.skipComments()
 	if p.text() == "{" {

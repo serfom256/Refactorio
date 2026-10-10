@@ -216,9 +216,9 @@ public class UseStar { int y = X; }
 
 func TestMoveClass_MultiModuleGradle(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"settings.gradle":                "include ':app', ':lib'",
-		"app/build.gradle":               "",
-		"lib/build.gradle":               "",
+		"settings.gradle":                    "include ':app', ':lib'",
+		"app/build.gradle":                   "",
+		"lib/build.gradle":                   "",
 		"lib/src/main/java/com/foo/Bar.java": "package com.foo; public class Bar {}\n",
 		"app/src/main/java/com/app/User.java": `package com.app;
 import com.foo.Bar;

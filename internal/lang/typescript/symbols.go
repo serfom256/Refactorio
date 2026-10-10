@@ -187,11 +187,12 @@ func isDeclarationKeyword(s string) bool {
 }
 
 // parseImport handles all import forms:
-//   import { Foo, Bar as B } from './path'
-//   import * as X from './path'
-//   import Foo from './path'
-//   import './path'  (side-effect)
-//   import type { Foo } from './path'
+//
+//	import { Foo, Bar as B } from './path'
+//	import * as X from './path'
+//	import Foo from './path'
+//	import './path'  (side-effect)
+//	import type { Foo } from './path'
 func (p *tsParser) parseImport() (ImportDecl, bool) {
 	imp := ImportDecl{Range: Range{Start: p.at().Start, Line: p.at().Line}}
 	p.skip() // "import"

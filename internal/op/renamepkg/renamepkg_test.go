@@ -44,9 +44,9 @@ func read(t *testing.T, p string) string {
 
 func TestRenamePkg_PackageDecls(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"build.gradle":                      "",
-		"src/main/java/com/foo/Bar.java":    "package com.foo; public class Bar {}\n",
-		"src/main/java/com/foo/Baz.java":    "package com.foo; public class Baz {}\n",
+		"build.gradle":                   "",
+		"src/main/java/com/foo/Bar.java": "package com.foo; public class Bar {}\n",
+		"src/main/java/com/foo/Baz.java": "package com.foo; public class Baz {}\n",
 	})
 	set, err := Plan(Request{OldPackage: "com.foo", NewPackage: "com.qux", Index: idx})
 	if err != nil {
@@ -72,8 +72,8 @@ func TestRenamePkg_PackageDecls(t *testing.T) {
 
 func TestRenamePkg_ImportsRewritten(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"build.gradle":                      "",
-		"src/main/java/com/foo/Bar.java":    "package com.foo; public class Bar {}\n",
+		"build.gradle":                   "",
+		"src/main/java/com/foo/Bar.java": "package com.foo; public class Bar {}\n",
 		"src/main/java/com/app/User.java": `package com.app;
 import com.foo.Bar;
 public class User { Bar b; }
@@ -94,8 +94,8 @@ public class User { Bar b; }
 
 func TestRenamePkg_WildcardImportRewritten(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"build.gradle":                      "",
-		"src/main/java/com/foo/Bar.java":    "package com.foo; public class Bar {}\n",
+		"build.gradle":                   "",
+		"src/main/java/com/foo/Bar.java": "package com.foo; public class Bar {}\n",
 		"src/main/java/com/app/User.java": `package com.app;
 import com.foo.*;
 public class User { Bar b; }
@@ -116,8 +116,8 @@ public class User { Bar b; }
 
 func TestRenamePkg_StaticImportsRewritten(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"build.gradle":                      "",
-		"src/main/java/com/foo/Bar.java":    "package com.foo; public class Bar { public static int X; }\n",
+		"build.gradle":                   "",
+		"src/main/java/com/foo/Bar.java": "package com.foo; public class Bar { public static int X; }\n",
 		"src/main/java/com/app/User.java": `package com.app;
 import static com.foo.Bar.X;
 public class User { int x = X; }
@@ -138,11 +138,11 @@ public class User { int x = X; }
 
 func TestRenamePkg_MultiModule(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"settings.gradle":                            "include ':app', ':lib'",
-		"app/build.gradle":                           "",
-		"lib/build.gradle":                           "",
-		"lib/src/main/java/com/foo/Bar.java":         "package com.foo; public class Bar {}\n",
-		"lib/src/main/java/com/foo/Baz.java":         "package com.foo; public class Baz {}\n",
+		"settings.gradle":                    "include ':app', ':lib'",
+		"app/build.gradle":                   "",
+		"lib/build.gradle":                   "",
+		"lib/src/main/java/com/foo/Bar.java": "package com.foo; public class Bar {}\n",
+		"lib/src/main/java/com/foo/Baz.java": "package com.foo; public class Baz {}\n",
 		"app/src/main/java/com/app/User.java": `package com.app;
 import com.foo.Bar;
 import com.foo.Baz;
@@ -168,9 +168,9 @@ public class User { Bar b; Baz z; }
 
 func TestRenamePkg_DoesNotTouchOtherPackages(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"build.gradle":                         "",
-		"src/main/java/com/foo/Bar.java":       "package com.foo; public class Bar {}\n",
-		"src/main/java/com/foo/sub/Deep.java":  "package com.foo.sub; public class Deep {}\n",
+		"build.gradle":                        "",
+		"src/main/java/com/foo/Bar.java":      "package com.foo; public class Bar {}\n",
+		"src/main/java/com/foo/sub/Deep.java": "package com.foo.sub; public class Deep {}\n",
 	})
 	set, err := Plan(Request{OldPackage: "com.foo", NewPackage: "com.qux", Index: idx})
 	if err != nil {

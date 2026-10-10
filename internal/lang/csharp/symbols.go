@@ -412,11 +412,12 @@ func (p *csParser) parseTypeBody(td *TypeDecl) {
 }
 
 // tryParseMembers handles a single declaration:
-//   modifiers... type name ( ... ) { ... }     // method
-//   modifiers... ClassName ( ... ) { ... }     // constructor
-//   modifiers... type name { get; set; }       // property
-//   modifiers... type name = expr;             // field
-//   modifiers... type name1, name2, name3;     // field (multi)
+//
+//	modifiers... type name ( ... ) { ... }     // method
+//	modifiers... ClassName ( ... ) { ... }     // constructor
+//	modifiers... type name { get; set; }       // property
+//	modifiers... type name = expr;             // field
+//	modifiers... type name1, name2, name3;     // field (multi)
 func (p *csParser) tryParseMembers(className string) []MemberDecl {
 	save := p.pos
 

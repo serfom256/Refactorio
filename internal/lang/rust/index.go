@@ -8,10 +8,10 @@ import (
 )
 
 type Index struct {
-	Root       string
-	CrateName  string
-	files      map[string]*FileEntry
-	byModule   map[string][]string // module path → files
+	Root      string
+	CrateName string
+	files     map[string]*FileEntry
+	byModule  map[string][]string // module path → files
 }
 
 type FileEntry struct {

@@ -67,9 +67,9 @@ public class Baz {}
 
 func TestBuild_SameSimpleNameAcrossPackages(t *testing.T) {
 	p := mkProject(t, map[string]string{
-		"build.gradle":                       "",
-		"src/main/java/a/Util.java":          "package a; public class Util {}\n",
-		"src/main/java/b/Util.java":          "package b; public class Util {}\n",
+		"build.gradle":              "",
+		"src/main/java/a/Util.java": "package a; public class Util {}\n",
+		"src/main/java/b/Util.java": "package b; public class Util {}\n",
 	})
 	idx, _ := Build(p, ".java")
 	got := idx.LookupType("Util")
@@ -85,7 +85,7 @@ func TestBuild_SameSimpleNameAcrossPackages(t *testing.T) {
 
 func TestFilesImporting_ExplicitImport(t *testing.T) {
 	p := mkProject(t, map[string]string{
-		"build.gradle":                  "",
+		"build.gradle":                   "",
 		"src/main/java/com/foo/Bar.java": "package com.foo; public class Bar {}\n",
 		"src/main/java/app/User.java": `package app;
 import com.foo.Bar;
@@ -108,7 +108,7 @@ public class User { Bar b; }
 
 func TestFilesImporting_WildcardImport(t *testing.T) {
 	p := mkProject(t, map[string]string{
-		"build.gradle":                  "",
+		"build.gradle":                   "",
 		"src/main/java/com/foo/Bar.java": "package com.foo; public class Bar {}\n",
 		"src/main/java/app/User.java": `package app;
 import com.foo.*;
@@ -125,10 +125,10 @@ public class User { Bar b; }
 func TestFilesImporting_SamePackage(t *testing.T) {
 	// A file in the same package as Bar can reference it without an import.
 	p := mkProject(t, map[string]string{
-		"build.gradle":                  "",
-		"src/main/java/com/foo/Bar.java":   "package com.foo; public class Bar {}\n",
+		"build.gradle":                       "",
+		"src/main/java/com/foo/Bar.java":     "package com.foo; public class Bar {}\n",
 		"src/main/java/com/foo/Sibling.java": "package com.foo; public class Sibling { Bar b; }\n",
-		"src/main/java/elsewhere/X.java": "package elsewhere; public class X {}\n",
+		"src/main/java/elsewhere/X.java":     "package elsewhere; public class X {}\n",
 	})
 	idx, _ := Build(p, ".java")
 	got := idx.FilesImporting("com.foo.Bar")
@@ -147,7 +147,7 @@ func TestFilesImporting_StaticImports(t *testing.T) {
 	// `import static com.foo.Bar.method` and `import static com.foo.Bar.*`
 	// both mean the file references the Bar TYPE.
 	p := mkProject(t, map[string]string{
-		"build.gradle":                  "",
+		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
 public class Bar { public static int x; public static void m() {} }
 `,
@@ -170,10 +170,10 @@ public class UsesStar { void f() { m(); } }
 
 func TestFilesImporting_MultiModuleGradle(t *testing.T) {
 	p := mkProject(t, map[string]string{
-		"settings.gradle":                            "include ':app', ':lib'",
-		"app/build.gradle":                           "",
-		"lib/build.gradle":                           "",
-		"lib/src/main/java/com/foo/Bar.java":         "package com.foo; public class Bar {}\n",
+		"settings.gradle":                    "include ':app', ':lib'",
+		"app/build.gradle":                   "",
+		"lib/build.gradle":                   "",
+		"lib/src/main/java/com/foo/Bar.java": "package com.foo; public class Bar {}\n",
 		"app/src/main/java/app/User.java": `package app;
 import com.foo.Bar;
 public class User { Bar b; }
@@ -205,9 +205,9 @@ func TestBuild_RecordsParseErrors(t *testing.T) {
 	// partial symbols, so it MAY still appear in Files() without error.
 	// What we test here: index never returns an error from Build itself.
 	p := mkProject(t, map[string]string{
-		"build.gradle":                  "",
-		"src/main/java/Good.java":       "public class Good {}\n",
-		"src/main/java/Broken.java":     "class\n", // syntactically incomplete
+		"build.gradle":              "",
+		"src/main/java/Good.java":   "public class Good {}\n",
+		"src/main/java/Broken.java": "class\n", // syntactically incomplete
 	})
 	idx, err := Build(p, ".java")
 	if err != nil {

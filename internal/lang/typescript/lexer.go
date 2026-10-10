@@ -1,7 +1,7 @@
 // Package typescript provides TS/JS lexing and symbol extraction for
 // the refactoring ops. Covers .ts, .tsx, .js, .jsx, .mts, .cts, .mjs, .cjs.
 //
-// Key difference from the Java lexer: template literals `` `...${expr}...` ``
+// Key difference from the Java lexer: template literals “ `...${expr}...` “
 // are split into string fragments and code tokens. Identifiers inside
 // `${...}` appear as normal TIdent tokens in the stream so rename ops
 // find them. This matches the language semantics — template substitutions
@@ -216,7 +216,7 @@ func (l *lexer) stringLiteral(start int, quote byte) (Token, bool) {
 	return l.emit(TString, start), true
 }
 
-// templateLiteral handles `` `text${expr}text` ``. It emits:
+// templateLiteral handles “ `text${expr}text` “. It emits:
 //   - TTemplate for each text fragment
 //   - Normal tokens for expressions inside ${...}
 //

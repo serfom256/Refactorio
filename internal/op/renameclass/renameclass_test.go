@@ -291,9 +291,9 @@ public class UsesStar { void f() { m(); } }
 
 func TestRenameClass_MultiModuleGradle(t *testing.T) {
 	p, root := mkProject(t, map[string]string{
-		"settings.gradle":                "include ':app', ':lib'",
-		"app/build.gradle":               "",
-		"lib/build.gradle":               "",
+		"settings.gradle":  "include ':app', ':lib'",
+		"app/build.gradle": "",
+		"lib/build.gradle": "",
 		"lib/src/main/java/com/foo/Bar.java": `package com.foo;
 public class Bar {}
 `,
@@ -329,7 +329,7 @@ func TestRenameClass_UnrelatedSameNameUntouched(t *testing.T) {
 	// com.foo.Bar exists; com.other.Bar also exists. Renaming com.foo.Bar
 	// must NOT touch com.other.Bar's declaration.
 	p, root := mkProject(t, map[string]string{
-		"build.gradle": "",
+		"build.gradle":                     "",
 		"src/main/java/com/foo/Bar.java":   "package com.foo; public class Bar {}\n",
 		"src/main/java/com/other/Bar.java": "package com.other; public class Bar { Bar self() { return this; } }\n",
 	})
@@ -360,9 +360,9 @@ func TestRenameClass_UnknownFQN(t *testing.T) {
 
 func TestRenameClass_SuggestsCandidate(t *testing.T) {
 	p, _ := mkProject(t, map[string]string{
-		"build.gradle":                     "",
-		"src/main/java/com/a/Bar.java":     "package com.a; public class Bar {}\n",
-		"src/main/java/com/b/Bar.java":     "package com.b; public class Bar {}\n",
+		"build.gradle":                 "",
+		"src/main/java/com/a/Bar.java": "package com.a; public class Bar {}\n",
+		"src/main/java/com/b/Bar.java": "package com.b; public class Bar {}\n",
 	})
 	idx := buildIndex(t, p)
 	_, err := Plan(Request{FQN: "com.wrong.Bar", NewName: "Baz", Index: idx})

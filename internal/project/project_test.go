@@ -41,9 +41,9 @@ func TestDetect_NoProject(t *testing.T) {
 func TestDetect_SingleModuleGradle(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"build.gradle":            "",
-		"src/main/java/A.java":    "class A {}",
-		"src/test/java/AT.java":   "class AT {}",
+		"build.gradle":          "",
+		"src/main/java/A.java":  "class A {}",
+		"src/test/java/AT.java": "class AT {}",
 	})
 	p, err := DetectFrom(filepath.Join(root, "src/main/java"))
 	if err != nil {
@@ -76,12 +76,12 @@ func TestDetect_MultiModuleGradleGroovy(t *testing.T) {
 			/* trailing */
 			include 'tools' // comma-less form, deprecated but seen
 		`,
-		"app/build.gradle":               "",
-		"app/src/main/java/A.java":       "package app; class A {}",
-		"lib/core/build.gradle":          "",
-		"lib/core/src/main/java/B.java":  "package lib.core; class B {}",
-		"tools/build.gradle":             "",
-		"tools/src/main/java/T.java":     "package tools; class T {}",
+		"app/build.gradle":              "",
+		"app/src/main/java/A.java":      "package app; class A {}",
+		"lib/core/build.gradle":         "",
+		"lib/core/src/main/java/B.java": "package lib.core; class B {}",
+		"tools/build.gradle":            "",
+		"tools/src/main/java/T.java":    "package tools; class T {}",
 	})
 	p, err := DetectFrom(root)
 	if err != nil {
@@ -106,10 +106,10 @@ func TestDetect_MultiModuleGradleKotlin(t *testing.T) {
 			include(":app")
 			include(":lib:core")
 		`,
-		"app/build.gradle.kts":              "",
-		"app/src/main/kotlin/A.kt":          "package app",
-		"lib/core/build.gradle.kts":         "",
-		"lib/core/src/main/kotlin/B.kt":     "package lib.core",
+		"app/build.gradle.kts":          "",
+		"app/src/main/kotlin/A.kt":      "package app",
+		"lib/core/build.gradle.kts":     "",
+		"lib/core/src/main/kotlin/B.kt": "package lib.core",
 	})
 	p, err := DetectFrom(root)
 	if err != nil {
@@ -198,13 +198,13 @@ func TestDetect_MultiModuleMaven(t *testing.T) {
 func TestSourceFiles_FiltersByExtension(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"settings.gradle":               "include ':app', ':lib'",
-		"app/src/main/java/A.java":      "class A {}",
-		"app/src/main/java/com/X.java":  "class X {}",
-		"app/src/test/java/AT.java":     "class AT {}",
-		"app/src/main/kotlin/K.kt":      "",
-		"lib/src/main/java/L.java":      "",
-		"unrelated/notes.txt":           "",
+		"settings.gradle":              "include ':app', ':lib'",
+		"app/src/main/java/A.java":     "class A {}",
+		"app/src/main/java/com/X.java": "class X {}",
+		"app/src/test/java/AT.java":    "class AT {}",
+		"app/src/main/kotlin/K.kt":     "",
+		"lib/src/main/java/L.java":     "",
+		"unrelated/notes.txt":          "",
 	})
 	p, err := DetectFrom(root)
 	if err != nil {
@@ -229,8 +229,8 @@ func TestSourceFiles_FiltersByExtension(t *testing.T) {
 func TestDetect_WalksUpFromDeepFile(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"settings.gradle":                          "include ':app'",
-		"app/src/main/java/com/foo/deep/X.java":    "class X {}",
+		"settings.gradle":                       "include ':app'",
+		"app/src/main/java/com/foo/deep/X.java": "class X {}",
 	})
 	p, err := DetectFrom(filepath.Join(root, "app/src/main/java/com/foo/deep/X.java"))
 	if err != nil {

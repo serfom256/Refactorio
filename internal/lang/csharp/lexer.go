@@ -21,10 +21,10 @@ const (
 )
 
 const (
-	TVerbatim    TokenKind = common.TLangSpecific + iota // @"..."
-	TInterpolated                                        // $"..." or $@"..." or $"""..."""
-	TRawStr                                              // """..."""
-	TChar                                                // 'x'
+	TVerbatim     TokenKind = common.TLangSpecific + iota // @"..."
+	TInterpolated                                         // $"..." or $@"..." or $"""..."""
+	TRawStr                                               // """..."""
+	TChar                                                 // 'x'
 )
 
 type Token struct {
@@ -337,7 +337,7 @@ func (l *lexer) interpolatedVerbatim(start int) (Token, bool) {
 
 // interpolatedRaw handles $"""..."""
 func (l *lexer) interpolatedRaw(start int) (Token, bool) {
-	l.pos++ // $
+	l.pos++                           // $
 	return l.rawString(l.pos - 1 + 1) // close-enough; whole token range tracked via start
 }
 

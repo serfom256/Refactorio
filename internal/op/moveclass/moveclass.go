@@ -7,12 +7,12 @@
 //  2. Move the file on disk from the old package path to the new one
 //     under the SAME source root.
 //  3. Rewrite imports in dependent files:
-//       - explicit  `import com.foo.Bar` → `import com.qux.Bar`
-//       - static    `import static com.foo.Bar.X` → `import static com.qux.Bar.X`
+//     - explicit  `import com.foo.Bar` → `import com.qux.Bar`
+//     - static    `import static com.foo.Bar.X` → `import static com.qux.Bar.X`
 //  4. Add explicit `import com.qux.Bar;` to dependents that previously
 //     reached Bar without naming the new package — namely:
-//       - files in the old package (had same-package access, now lost)
-//       - files with `import com.foo.*` (wildcard no longer covers Bar)
+//     - files in the old package (had same-package access, now lost)
+//     - files with `import com.foo.*` (wildcard no longer covers Bar)
 //     unless the file is now in the new package itself.
 //
 // Known limits:
@@ -44,8 +44,8 @@ import (
 
 // Request is the input.
 type Request struct {
-	FQN        string       // e.g. "com.foo.Bar"
-	NewPackage string       // e.g. "com.qux"
+	FQN        string // e.g. "com.foo.Bar"
+	NewPackage string // e.g. "com.qux"
 	Index      *index.Index
 }
 

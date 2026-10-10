@@ -21,9 +21,9 @@ const (
 )
 
 const (
-	TRawStr  TokenKind = common.TLangSpecific + iota // r"...", r#"..."#, r##"..."##
-	TChar                                            // 'x', '\n'
-	TLifetime                                        // 'a, 'static
+	TRawStr   TokenKind = common.TLangSpecific + iota // r"...", r#"..."#, r##"..."##
+	TChar                                             // 'x', '\n'
+	TLifetime                                         // 'a, 'static
 )
 
 type Token struct {

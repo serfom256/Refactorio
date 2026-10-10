@@ -118,9 +118,9 @@ fun main() {
 
 func TestKtRename_SamePackage(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"build.gradle": "",
+		"build.gradle":                       "",
 		"src/main/kotlin/com/foo/Bar.kt":     "package com.foo\nclass Bar\n",
-		"src/main/kotlin/com/foo/Sibling.kt":  "package com.foo\nval b = Bar()\n",
+		"src/main/kotlin/com/foo/Sibling.kt": "package com.foo\nval b = Bar()\n",
 	})
 	set, err := PlanRename(RenameRequest{FQN: "com.foo.Bar", NewName: "Qux", Index: idx})
 	if err != nil {
@@ -137,7 +137,7 @@ func TestKtRename_SamePackage(t *testing.T) {
 
 func TestKtRename_WildcardImport(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"build.gradle": "",
+		"build.gradle":                   "",
 		"src/main/kotlin/com/foo/Bar.kt": "package com.foo\nclass Bar\n",
 		"src/main/kotlin/com/app/User.kt": `package com.app
 import com.foo.*
@@ -206,10 +206,10 @@ val s = "Bar is a string"
 
 func TestKtRename_MultiModule(t *testing.T) {
 	idx, root := mk(t, map[string]string{
-		"settings.gradle":                             "include ':app', ':lib'",
-		"app/build.gradle":                            "",
-		"lib/build.gradle":                            "",
-		"lib/src/main/kotlin/com/foo/Bar.kt":          "package com.foo\nclass Bar\n",
+		"settings.gradle":                    "include ':app', ':lib'",
+		"app/build.gradle":                   "",
+		"lib/build.gradle":                   "",
+		"lib/src/main/kotlin/com/foo/Bar.kt": "package com.foo\nclass Bar\n",
 		"app/src/main/kotlin/com/app/User.kt": `package com.app
 import com.foo.Bar
 val b = Bar()
@@ -230,8 +230,8 @@ val b = Bar()
 
 func TestKtRename_NotFound(t *testing.T) {
 	idx, _ := mk(t, map[string]string{
-		"build.gradle":                       "",
-		"src/main/kotlin/com/foo/Bar.kt":     "package com.foo\nclass Bar\n",
+		"build.gradle":                   "",
+		"src/main/kotlin/com/foo/Bar.kt": "package com.foo\nclass Bar\n",
 	})
 	_, err := PlanRename(RenameRequest{FQN: "com.foo.Ghost", NewName: "X", Index: idx})
 	if err == nil {

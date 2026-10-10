@@ -14,8 +14,8 @@ import (
 )
 
 type Request struct {
-	OldPackage string       // e.g. "com.foo"
-	NewPackage string       // e.g. "com.bar"
+	OldPackage string // e.g. "com.foo"
+	NewPackage string // e.g. "com.bar"
 	Index      *index.Index
 }
 

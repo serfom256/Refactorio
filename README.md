@@ -1,8 +1,18 @@
 # Refactorio
 
-A cross-file refactoring CLI for Java, Kotlin, Go, TypeScript, and JavaScript projects. Pure Go, zero dependencies, no LSP or compiler required.
+A cross-file refactoring CLI for Java, Kotlin, Go, TypeScript, JavaScript, Rust, C#, and Python 3 projects. Pure Go, zero dependencies, no LSP or compiler required.
 
 Refactorio uses hand-rolled lexers and convention-based rules to find and rename symbols across an entire project. It is intentionally not 100% precise (no type system, no semantic analysis) but handles the common cases correctly and flags uncertain edits with confidence markers.
+
+## Contents
+
+- [Installation](#installation) · [Supported languages](#supported-languages) · [Commands](#commands)
+- Commands in detail: [rename](#rename) · [move](#move) · [delete](#delete) · [usages](#usages) · [rename-package](#rename-package) · [stats](#stats)
+- [Arguments reference](#arguments-reference) · [Rollback](#rollback) · [Dry run](#dry-run)
+- [Per-language limitations](#per-language-limitations) — read this before trusting a rename
+- [Multi-module support](#multi-module-project-support) · [Adding a language](#adding-a-new-language) · [Architecture](#architecture)
+
+---
 
 ## Installation
 
@@ -18,7 +28,31 @@ cd refactorio
 go build -o refactorio ./cmd/refactorio
 ```
 
+`go install` puts the binary in `$(go env GOPATH)/bin`, which is **not** on
+`PATH` by default. If `refactorio` isn't found afterwards, add it:
+
+```bash
+export PATH="$(go env GOPATH)/bin:$PATH"   # add to ~/.zshenv or ~/.bashrc
+```
+
+Put it in `~/.zshenv` rather than `~/.zshrc` if you want non-interactive shells
+— scripts, editors, agent tooling — to find it too; `~/.zshrc` is only read by
+interactive shells.
+
 No C compiler needed. No cgo. Cross-compiles to any OS/arch Go supports.
+
+### Usage statistics are recorded locally
+
+Every invocation is appended to `~/.refactorio/stats.jsonl` so that
+`refactorio stats` can report what you use and what fails. **Nothing is ever
+transmitted anywhere**, and symbol names, the file paths inside your project
+and raw error text are deliberately not recorded. To turn it off entirely:
+
+```bash
+export REFACTORIO_NO_STATS=1
+```
+
+See [stats](#stats) for exactly what a record contains.
 
 ---
 
@@ -595,12 +629,13 @@ without losing a single edit location.
 ## Architecture
 
 ```
-cmd/refactorio/main.go             CLI entry (7 commands: rename, move, delete, rename-package, usages, rollback, history)
+cmd/refactorio/main.go             CLI entry (8 commands: rename, move, delete, rename-package, usages, rollback, history, stats)
 internal/cli/                      key=value arg parser + subcommand dispatch + --help system
 internal/edit/                     Edit/Move/Delete sets, atomic apply, dry-run
 internal/project/                  Java/Kotlin project detection (Gradle/Maven)
 internal/index/                    Java project-wide symbol index
 internal/history/                  Per-project undo/rollback history (~/.refactorio/projects/<hash>/)
+internal/stats/                    Local usage statistics (~/.refactorio/stats.jsonl)
 internal/lang/
   common/                          Shared Range + TokenKind types
   java/                            Java lexer + symbol extractor
@@ -611,7 +646,7 @@ internal/lang/
   csharp/                          C# lexer + symbol extractor + index
   python/                          Python 3 lexer + symbol extractor + index
 internal/op/
-  unified/                         Unified rename/move/delete dispatcher + FQN scanner + access warnings
+  unified/                         Unified rename/move/delete dispatcher + FQN scanner + external package rename
   usages/                          Read-only find-usages (drives the rename layer)
   refs/                            Shared dangling-reference check used by delete
   renameclass/                     Java class rename logic (position-aware)
@@ -634,8 +669,8 @@ internal/op/
 go test ./...
 ```
 
-~250 tests across 26 packages. No external tools or services required.
+404 tests across 28 packages. No external tools or services required — no cgo, no network, no LSP.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

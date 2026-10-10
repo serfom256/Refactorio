@@ -2,8 +2,9 @@
 // file move with import-path updates.
 //
 // Subcommands:
-//   ts-rename   file=<path> symbol=<name> to=<newName>
-//   ts-move     file=<path> to=<newPath>
+//
+//	ts-rename   file=<path> symbol=<name> to=<newName>
+//	ts-move     file=<path> to=<newPath>
 package tsrename
 
 import (

@@ -131,4 +131,3 @@ func stripGroovyKotlinComments(s string) string {
 	}
 	return out.String()
 }
-

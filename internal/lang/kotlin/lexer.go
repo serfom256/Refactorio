@@ -335,7 +335,7 @@ func (l *lexer) charLiteral(start int) (Token, bool) {
 	return l.emit(TChar, start), true
 }
 
-// backtickIdent handles `` `keyword` `` identifiers.
+// backtickIdent handles “ `keyword` “ identifiers.
 func (l *lexer) backtickIdent(start int) (Token, bool) {
 	l.pos++ // skip `
 	for l.pos < len(l.src) && l.src[l.pos] != '`' && l.src[l.pos] != '\n' {

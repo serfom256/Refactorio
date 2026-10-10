@@ -9,10 +9,10 @@ import (
 
 // Index holds the project-wide view of Python source.
 type Index struct {
-	Root       string
-	files      map[string]*FileEntry
-	byModule   map[string][]string // module path → files
-	bySymbol   map[string][]*SymbolRef
+	Root     string
+	files    map[string]*FileEntry
+	byModule map[string][]string // module path → files
+	bySymbol map[string][]*SymbolRef
 }
 
 type FileEntry struct {
@@ -123,10 +123,11 @@ func (idx *Index) buildLookups() {
 // on its directory layout relative to the index root.
 //
 // Conventions:
-//   foo.py                → "foo"
-//   foo/__init__.py       → "foo"
-//   foo/bar.py            → "foo.bar"
-//   foo/bar/__init__.py   → "foo.bar"
+//
+//	foo.py                → "foo"
+//	foo/__init__.py       → "foo"
+//	foo/bar.py            → "foo.bar"
+//	foo/bar/__init__.py   → "foo.bar"
 func (idx *Index) FileToModulePath(file string) string {
 	rel, err := filepath.Rel(idx.Root, file)
 	if err != nil {
@@ -171,9 +172,10 @@ func (idx *Index) AllFiles() []string {
 
 // FilesUsing returns files whose imports could resolve the symbol
 // declared in (modulePath, symbolName). Covers:
-//   import modulePath               → uses modulePath.symbolName
-//   from modulePath import symbolName
-//   from modulePath import *
+//
+//	import modulePath               → uses modulePath.symbolName
+//	from modulePath import symbolName
+//	from modulePath import *
 func (idx *Index) FilesUsing(modulePath, symbolName string) []string {
 	seen := map[string]struct{}{}
 	for path, fe := range idx.files {

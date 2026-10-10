@@ -113,7 +113,7 @@ func Usage() string {
 	}
 
 	var b strings.Builder
-	b.WriteString("refactorio — cross-file refactoring for Java, Kotlin, Go, TypeScript, JavaScript, Rust\n\n")
+	b.WriteString("refactorio — cross-file refactoring for Java, Kotlin, Go, TypeScript, JavaScript, Rust, C#, Python\n\n")
 	b.WriteString("usage: refactorio <command> key=value ...\n\n")
 	b.WriteString("commands:\n")
 	for _, n := range names {

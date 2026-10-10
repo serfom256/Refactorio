@@ -45,7 +45,7 @@ func (k Kind) String() string {
 
 // Project is the detected project root and its modules.
 type Project struct {
-	Root    string    // absolute path
+	Root    string // absolute path
 	Kind    Kind
 	Modules []*Module
 }

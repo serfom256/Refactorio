@@ -93,8 +93,8 @@ func Build(p *project.Project, exts ...string) (*Index, error) {
 	}
 	// Extraction is CPU-bound and per-file independent; parallelise.
 	type result struct {
-		path    string
-		entry   *FileEntry
+		path  string
+		entry *FileEntry
 	}
 	in := make(chan string, len(files))
 	out := make(chan result, len(files))

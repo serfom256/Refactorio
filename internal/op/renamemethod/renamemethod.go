@@ -78,7 +78,7 @@ func Plan(req Request) (*edit.Set, error) {
 				set.Add(edit.Edit{
 					File: fe.Path, Start: imp.PathRange.Start, End: imp.PathRange.End,
 					NewText: target.FQN + "." + req.NewName,
-					Why: fmt.Sprintf("update static import %s.%s -> %s", target.FQN, req.Method, req.NewName),
+					Why:     fmt.Sprintf("update static import %s.%s -> %s", target.FQN, req.Method, req.NewName),
 				})
 			}
 		}
