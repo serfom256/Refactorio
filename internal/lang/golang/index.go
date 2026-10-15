@@ -7,13 +7,11 @@ import (
 	"sync"
 )
 
-// Index holds the project-wide view of Go source files.
 type Index struct {
-	ModulePath string // from go.mod, e.g. "github.com/foo/bar"
-	Root       string // absolute path of go.mod's directory
+	ModulePath string
+	Root       string
 	files      map[string]*FileEntry
-	// byPkg maps import path → list of files in that package.
-	byPkg map[string][]string
+	byPkg      map[string][]string
 }
 
 type FileEntry struct {
@@ -22,8 +20,6 @@ type FileEntry struct {
 	Err     error
 }
 
-// BuildIndex reads go.mod from root, walks for .go files (excluding
-// vendor, testdata, .git), and builds the lookup tables.
 func BuildIndex(root string) (*Index, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -112,8 +108,6 @@ func (idx *Index) buildPkgMap() {
 	}
 }
 
-// fileToImportPath computes the Go import path for a file based on
-// its directory relative to the module root.
 func (idx *Index) FileToImportPath(file string) string {
 	dir := filepath.Dir(file)
 	rel, err := filepath.Rel(idx.Root, dir)
@@ -126,12 +120,10 @@ func (idx *Index) FileToImportPath(file string) string {
 	return idx.ModulePath + "/" + filepath.ToSlash(rel)
 }
 
-// File returns the entry for an exact path.
 func (idx *Index) File(path string) *FileEntry {
 	return idx.files[path]
 }
 
-// AllFiles returns every indexed file path.
 func (idx *Index) AllFiles() []string {
 	out := make([]string, 0, len(idx.files))
 	for p := range idx.files {
@@ -140,12 +132,10 @@ func (idx *Index) AllFiles() []string {
 	return out
 }
 
-// FilesInPackage returns all .go files with the given import path.
 func (idx *Index) FilesInPackage(importPath string) []string {
 	return idx.byPkg[importPath]
 }
 
-// FilesImporting returns paths of files that import the given package.
 func (idx *Index) FilesImporting(importPath string) []string {
 	var out []string
 	for path, fe := range idx.files {
@@ -162,8 +152,6 @@ func (idx *Index) FilesImporting(importPath string) []string {
 	return out
 }
 
-// FindDeclaration locates the file and declaration where name is
-// declared in the given package.
 func (idx *Index) FindDeclaration(pkgImportPath, name string) (*FileEntry, *Declaration) {
 	for _, path := range idx.byPkg[pkgImportPath] {
 		fe := idx.files[path]
@@ -179,8 +167,6 @@ func (idx *Index) FindDeclaration(pkgImportPath, name string) (*FileEntry, *Decl
 	return nil, nil
 }
 
-// ImportPathToDir returns the absolute directory for an import path
-// within this module.
 func (idx *Index) ImportPathToDir(importPath string) string {
 	if importPath == idx.ModulePath {
 		return idx.Root

@@ -7,14 +7,6 @@ import (
 	"strings"
 )
 
-// loadGradle resolves a gradle project's modules by parsing
-// settings.gradle{.kts}. If no settings file is present (single-module
-// build.gradle layout), the root itself is the only module.
-//
-// We do not evaluate the gradle DSL. The regex extracts every
-// `include 'path'` / `include(":path")` argument literal we can see.
-// Programmatic registration (loops, function calls) is invisible to us
-// — flagged as a known limit in project.go.
 func loadGradle(root string) (*Project, error) {
 	p := &Project{Root: root, Kind: KindGradle}
 
@@ -23,7 +15,6 @@ func loadGradle(root string) (*Project, error) {
 		return nil, err
 	}
 
-	// Root module — always present, even if there are subprojects.
 	rootMod := &Module{
 		Name:        ":",
 		Path:        root,
@@ -32,13 +23,9 @@ func loadGradle(root string) (*Project, error) {
 	p.Modules = append(p.Modules, rootMod)
 
 	for _, inc := range includes {
-		// Gradle paths use ':' as separator; translate to filesystem.
 		rel := strings.ReplaceAll(strings.TrimPrefix(inc, ":"), ":", string(filepath.Separator))
 		modPath := filepath.Join(root, rel)
 		if _, err := os.Stat(modPath); err != nil {
-			// Listed but missing on disk — settings file lies. Skip
-			// silently; alternatives are noisy logs that we'd then
-			// need to plumb up to the CLI layer.
 			continue
 		}
 		p.Modules = append(p.Modules, &Module{
@@ -50,20 +37,79 @@ func loadGradle(root string) (*Project, error) {
 	return p, nil
 }
 
-// gradleIncludeArg captures the path literal of a single include() arg.
-// It matches single-quoted, double-quoted, or triple-quoted strings
-// containing alphanumerics, underscores, hyphens, dots, and colons.
-// Comments are pre-stripped before this runs.
 var gradleIncludeArg = regexp.MustCompile(`['"]([:.\w\-]+)['"]`)
 
-// gradleIncludeStmt captures the parenthesised or whitespace-delimited
-// argument list of a single `include` call. Multiple args separated by
-// commas are picked apart by gradleIncludeArg afterwards.
-var gradleIncludeStmt = regexp.MustCompile(`(?m)^\s*include\s*[\(\s]([^)\n]+)\)?`)
+func includeArgLists(src string) []string {
+	var out []string
+	for i := 0; i+len("include") <= len(src); i++ {
+		if src[i] != 'i' || !strings.HasPrefix(src[i:], "include") {
+			continue
+		}
+		if i > 0 && isIdentByte(src[i-1]) {
+			continue
+		}
+		j := i + len("include")
+		for j < len(src) && (src[j] == ' ' || src[j] == '\t') {
+			j++
+		}
+		if j >= len(src) {
+			break
+		}
+		switch {
+		case src[j] == '(':
+			if end := matchParen(src, j); end > 0 {
+				out = append(out, src[j+1:end])
+				i = end
+			}
+		case src[j] == '\'' || src[j] == '"':
+			end := j
+			for end < len(src) && src[end] != '\n' {
+				end++
+			}
+			out = append(out, src[j:end])
+			i = end
+		}
+	}
+	return out
+}
+
+func matchParen(src string, open int) int {
+	depth := 0
+	for i := open; i < len(src); i++ {
+		switch c := src[i]; c {
+		case '\'', '"':
+			i = skipString(src, i)
+		case '(':
+			depth++
+		case ')':
+			if depth--; depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func skipString(src string, i int) int {
+	quote := src[i]
+	for j := i + 1; j < len(src); j++ {
+		if src[j] == '\\' {
+			j++
+			continue
+		}
+		if src[j] == quote {
+			return j
+		}
+	}
+	return len(src) - 1
+}
+
+func isIdentByte(b byte) bool {
+	return b == '_' || b == '.' ||
+		(b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
 
 func parseGradleSettings(root string) ([]string, error) {
-	// .kts has priority because Kotlin DSL is more common in new
-	// projects; both are scanned the same way.
 	var bytes []byte
 	for _, name := range []string{"settings.gradle.kts", "settings.gradle"} {
 		b, err := os.ReadFile(filepath.Join(root, name))
@@ -73,15 +119,13 @@ func parseGradleSettings(root string) ([]string, error) {
 		}
 	}
 	if bytes == nil {
-		// Single-module project with only build.gradle{.kts} is legal.
 		return nil, nil
 	}
 	stripped := stripGroovyKotlinComments(string(bytes))
 
 	var includes []string
 	seen := map[string]struct{}{}
-	for _, m := range gradleIncludeStmt.FindAllStringSubmatchIndex(stripped, -1) {
-		argList := stripped[m[2]:m[3]]
+	for _, argList := range includeArgLists(stripped) {
 		for _, arg := range gradleIncludeArg.FindAllStringSubmatch(argList, -1) {
 			path := strings.TrimPrefix(arg[1], ":")
 			if path == "" {
@@ -97,10 +141,6 @@ func parseGradleSettings(root string) ([]string, error) {
 	return includes, nil
 }
 
-// stripGroovyKotlinComments removes // and /* */ style comments. Both
-// Groovy and Kotlin gradle scripts share this comment syntax. Strings
-// are NOT stripped — but include statements use string literals as
-// arguments, so we have to leave them alone.
 func stripGroovyKotlinComments(s string) string {
 	var out strings.Builder
 	out.Grow(len(s))

@@ -64,7 +64,6 @@ func Plan(req Request) (*edit.Set, error) {
 		}
 	}
 
-	// Rewrite static imports.
 	for _, path := range req.Index.FilesImporting(target.FQN) {
 		fe := req.Index.File(path)
 		if fe == nil || fe.Symbols == nil {
@@ -110,22 +109,19 @@ func planFile(
 		if tok.Kind != java.TIdent || tok.Text != oldName {
 			continue
 		}
-		// Skip declaration edits already emitted.
 		if fe.Path == target.File && isDeclRange(tok, target) {
 			continue
 		}
 
-		// Pattern 1: obj.field (field access)
 		prev := prevNonComment(tokens, i-1)
 		if prev != nil && prev.Text == "." {
 			receiver := prevNonComment(tokens, indexOf(tokens, prev)-1)
 			if receiver == nil {
 				continue
 			}
-			// Exclude method calls: field followed by (
 			next := nextNonComment(tokens, i+1)
 			if next != nil && next.Text == "(" {
-				continue // This is a method call, not a field access.
+				continue
 			}
 			conf, ok := classifyReceiver(receiver, target, varTypes, targetBody, fileResolves)
 			if !ok {
@@ -138,12 +134,10 @@ func planFile(
 			continue
 		}
 
-		// Pattern 2: bare identifier inside target class body (implicit this).
 		if targetBody != nil && targetBody.contains(tok.Start) && !hasShadow {
-			// Skip if this is a declaration context.
 			next := nextNonComment(tokens, i+1)
 			if next != nil && next.Text == "(" {
-				continue // method call, not field
+				continue
 			}
 			set.Add(edit.Edit{
 				File: fe.Path, Start: tok.Start, End: tok.End,
@@ -216,14 +210,10 @@ func scanVarTypes(tokens []java.Token) map[string]string {
 }
 
 func hasShadowingLocal(tokens []java.Token, fieldName string, targetBody *bodyRange, fieldDecl []java.MemberDecl) bool {
-	// Conservative: if any local/param declares an identifier with the
-	// same name as the field (NOT the field declaration itself), we
-	// skip bare-identifier rewrites to avoid renaming shadowed references.
 	for i, tok := range tokens {
 		if tok.Kind != java.TIdent || tok.Text != fieldName {
 			continue
 		}
-		// Skip the field declaration itself.
 		isFieldDecl := false
 		for _, f := range fieldDecl {
 			if tok.Start == f.NameRange.Start && tok.End == f.NameRange.End {
@@ -234,7 +224,6 @@ func hasShadowingLocal(tokens []java.Token, fieldName string, targetBody *bodyRa
 		if isFieldDecl {
 			continue
 		}
-		// Check if this looks like a local/param declaration.
 		prev := prevNonComment(tokens, i-1)
 		if prev == nil {
 			continue

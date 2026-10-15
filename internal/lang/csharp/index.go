@@ -7,13 +7,10 @@ import (
 	"sync"
 )
 
-// Index holds the project-wide view of C# source.
 type Index struct {
 	Root  string
 	files map[string]*FileEntry
-	// byNS maps namespace → files that declare in that namespace.
-	byNS map[string][]string
-	// byFQN maps "Namespace.TypeName" → declaration.
+	byNS  map[string][]string
 	byFQN map[string]*TypeRef
 }
 
@@ -30,9 +27,6 @@ type TypeRef struct {
 	FQN       string
 }
 
-// BuildIndex walks root for .cs files (excluding bin/, obj/, .git).
-// The root is the directory that contains the .csproj/.sln (or any
-// directory the user passes — we don't require either).
 func BuildIndex(root string) (*Index, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -145,8 +139,6 @@ func (idx *Index) LookupFQN(fqn string) *TypeRef { return idx.byFQN[fqn] }
 
 func (idx *Index) FilesInNamespace(ns string) []string { return idx.byNS[ns] }
 
-// FilesUsing returns files that have a using directive matching ns,
-// or are in the same namespace as ns.
 func (idx *Index) FilesUsing(ns string) []string {
 	seen := map[string]struct{}{}
 	for path, fe := range idx.files {

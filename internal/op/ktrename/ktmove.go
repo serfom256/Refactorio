@@ -10,10 +10,9 @@ import (
 	"github.com/serfom256/refactorio/internal/lang/kotlin"
 )
 
-// MoveRequest moves a Kotlin file to a new package.
 type MoveRequest struct {
-	FQN        string // e.g. "com.foo.Bar"
-	NewPackage string // e.g. "com.qux"
+	FQN        string
+	NewPackage string
 	Index      *KtIndex
 }
 
@@ -43,7 +42,6 @@ func PlanMove(req MoveRequest) (*edit.Set, error) {
 
 	set := edit.NewSet()
 
-	// 1. Rewrite package declaration.
 	if fe.Symbols.PackageRange.End > 0 {
 		set.Add(edit.Edit{
 			File: target.File, Start: fe.Symbols.PackageRange.Start, End: fe.Symbols.PackageRange.End,
@@ -51,7 +49,6 @@ func PlanMove(req MoveRequest) (*edit.Set, error) {
 		})
 	}
 
-	// 2. Rewrite imports in dependents.
 	for _, path := range req.Index.FilesImporting(req.FQN) {
 		if path == target.File {
 			continue
@@ -68,7 +65,6 @@ func PlanMove(req MoveRequest) (*edit.Set, error) {
 				})
 			}
 		}
-		// Same-package files now need an explicit import.
 		if depFE.Symbols.Package == target.Package {
 			insertOff := computeInsertionPoint(depFE)
 			set.Add(edit.Edit{
@@ -78,13 +74,11 @@ func PlanMove(req MoveRequest) (*edit.Set, error) {
 		}
 	}
 
-	// 3. Queue file move.
 	set.AddMove(edit.Move{From: target.File, To: newPath, Why: fmt.Sprintf("move to %s", req.NewPackage)})
 
 	return set, nil
 }
 
-// DeleteRequest removes a Kotlin file and cleans imports in dependents.
 type DeleteRequest struct {
 	FQN   string
 	Index *KtIndex
@@ -120,8 +114,6 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 				})
 			}
 		}
-		// Removing the import is the cleanup, not evidence that cleanup is
-		// still needed, so it deliberately does not feed into refs.
 		if hasCodeRef(path, depFE.Symbols.Imports, target.Name) {
 			refs = append(refs, path)
 		}
@@ -131,7 +123,6 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 	return &DeleteResult{Set: set, FilesWithReferences: refs}, nil
 }
 
-// RenamePackageRequest renames all files in a Kotlin package.
 type RenamePackageRequest struct {
 	OldPackage string
 	NewPackage string
@@ -154,7 +145,6 @@ func PlanRenamePackage(req RenamePackageRequest) (*edit.Set, error) {
 	set := edit.NewSet()
 	movedFiles := map[string]bool{}
 
-	// 1. Rewrite package decl + move each file.
 	for _, path := range filesInPkg {
 		if movedFiles[path] {
 			continue
@@ -176,7 +166,6 @@ func PlanRenamePackage(req RenamePackageRequest) (*edit.Set, error) {
 		}
 	}
 
-	// 2. Rewrite imports in dependents.
 	seen := map[string]bool{}
 	for _, path := range filesInPkg {
 		fe := req.Index.files[path]
@@ -217,10 +206,6 @@ func PlanRenamePackage(req RenamePackageRequest) (*edit.Set, error) {
 	return set, nil
 }
 
-// hasCodeRef reports whether the file still references name in code once the
-// imports naming it have been removed. Identifiers inside import statements
-// are skipped: those ranges are already queued for deletion, so counting them
-// reported every file whose import had just been cleaned.
 func hasCodeRef(path string, imports []kotlin.ImportSpec, name string) bool {
 	src, err := os.ReadFile(path)
 	if err != nil {

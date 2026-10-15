@@ -1,4 +1,3 @@
-// Package csharp provides C# lexing and symbol extraction.
 package csharp
 
 import (
@@ -21,10 +20,10 @@ const (
 )
 
 const (
-	TVerbatim     TokenKind = common.TLangSpecific + iota // @"..."
-	TInterpolated                                         // $"..." or $@"..." or $"""..."""
-	TRawStr                                               // """..."""
-	TChar                                                 // 'x'
+	TVerbatim TokenKind = common.TLangSpecific + iota
+	TInterpolated
+	TRawStr
+	TChar
 )
 
 type Token struct {
@@ -60,7 +59,6 @@ var csKeywords = map[string]struct{}{
 	"try": {}, "typeof": {}, "uint": {}, "ulong": {}, "unchecked": {},
 	"unsafe": {}, "ushort": {}, "using": {}, "virtual": {}, "void": {},
 	"volatile": {}, "while": {},
-	// contextual keywords
 	"add": {}, "alias": {}, "ascending": {}, "async": {}, "await": {},
 	"by": {}, "descending": {}, "dynamic": {}, "equals": {}, "from": {},
 	"get": {}, "global": {}, "group": {}, "init": {}, "into": {},
@@ -159,7 +157,6 @@ func (l *lexer) next(prev *[]Token) (Token, bool) {
 	case c == '\'':
 		return l.charLiteral(start)
 	case c == '@' && l.pos+1 < len(l.src) && isIdentStart(rune(l.src[l.pos+1])):
-		// @-prefixed identifier: @class, @if (escape keywords)
 		l.pos++
 		return l.identifier(start)
 	case isDigit(c):
@@ -213,9 +210,8 @@ func (l *lexer) stringLiteral(start int) (Token, bool) {
 	return l.emit(TString, start), true
 }
 
-// verbatimString handles @"..." where "" is an escaped quote and \ is literal.
 func (l *lexer) verbatimString(start int) (Token, bool) {
-	l.pos += 2 // skip @"
+	l.pos += 2
 	for l.pos < len(l.src) {
 		if l.src[l.pos] == '"' {
 			if l.pos+1 < len(l.src) && l.src[l.pos+1] == '"' {
@@ -230,9 +226,7 @@ func (l *lexer) verbatimString(start int) (Token, bool) {
 	return l.emit(TVerbatim, start), true
 }
 
-// rawString handles """...""" (C# 11).
 func (l *lexer) rawString(start int) (Token, bool) {
-	// Count opening quotes to know how many closers are required.
 	opens := 0
 	for l.pos < len(l.src) && l.src[l.pos] == '"' {
 		opens++
@@ -243,7 +237,6 @@ func (l *lexer) rawString(start int) (Token, bool) {
 			l.pos++
 			continue
 		}
-		// Count consecutive quotes.
 		j := l.pos
 		closes := 0
 		for j < len(l.src) && l.src[j] == '"' {
@@ -259,10 +252,8 @@ func (l *lexer) rawString(start int) (Token, bool) {
 	return l.emit(TRawStr, start), true
 }
 
-// interpolatedString handles $"...{expr}..." — splits into fragments
-// and lexes expressions inside braces.
 func (l *lexer) interpolatedString(start int, prev *[]Token) (Token, bool) {
-	l.pos += 2 // skip $"
+	l.pos += 2
 	fragStart := start
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
@@ -275,7 +266,6 @@ func (l *lexer) interpolatedString(start int, prev *[]Token) (Token, bool) {
 			return Token{Kind: TInterpolated, Start: fragStart, End: l.pos, Text: string(l.src[fragStart:l.pos]), Line: l.lineFor(fragStart)}, true
 		}
 		if c == '{' && l.peek(1) == '{' {
-			// escaped { — keep both as literal text
 			l.pos += 2
 			continue
 		}
@@ -318,9 +308,8 @@ func (l *lexer) interpolatedString(start int, prev *[]Token) (Token, bool) {
 	return Token{Kind: TInterpolated, Start: fragStart, End: l.pos, Text: string(l.src[fragStart:l.pos]), Line: l.lineFor(fragStart)}, true
 }
 
-// interpolatedVerbatim handles $@"...{expr}..." — verbatim + interpolation.
 func (l *lexer) interpolatedVerbatim(start int) (Token, bool) {
-	l.pos += 3 // skip $@"
+	l.pos += 3
 	for l.pos < len(l.src) {
 		if l.src[l.pos] == '"' {
 			if l.pos+1 < len(l.src) && l.src[l.pos+1] == '"' {
@@ -335,10 +324,9 @@ func (l *lexer) interpolatedVerbatim(start int) (Token, bool) {
 	return l.emit(TInterpolated, start), true
 }
 
-// interpolatedRaw handles $"""..."""
 func (l *lexer) interpolatedRaw(start int) (Token, bool) {
-	l.pos++                           // $
-	return l.rawString(l.pos - 1 + 1) // close-enough; whole token range tracked via start
+	l.pos++
+	return l.rawString(l.pos - 1 + 1)
 }
 
 func (l *lexer) charLiteral(start int) (Token, bool) {
@@ -406,7 +394,6 @@ func (l *lexer) number(start int) (Token, bool) {
 }
 
 func (l *lexer) consumeSuffix() {
-	// f, d, m for float/double/decimal; u/l/ul/lu for integer.
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
 		if c == 'f' || c == 'F' || c == 'd' || c == 'D' || c == 'm' || c == 'M' ||
@@ -497,7 +484,6 @@ func IsValidIdentifier(s string) bool {
 	if s == "" {
 		return false
 	}
-	// Allow leading @ to escape keywords.
 	start := 0
 	if s[0] == '@' && len(s) > 1 {
 		start = 1

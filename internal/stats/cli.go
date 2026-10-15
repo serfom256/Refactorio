@@ -100,7 +100,6 @@ func runStats(args *cli.Args, stdout, stderr io.Writer) error {
 	}
 }
 
-// parseSince accepts a relative window (7d, 12h) or an absolute YYYY-MM-DD.
 func parseSince(raw string, now time.Time) (time.Time, error) {
 	if t, err := time.Parse("2006-01-02", raw); err == nil {
 		return t, nil

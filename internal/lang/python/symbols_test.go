@@ -163,8 +163,6 @@ class Foo:
 }
 
 func TestExtract_LocalVariableNotTopLevel(t *testing.T) {
-	// `x` inside the function body must NOT appear as a top-level
-	// declaration.
 	src := []byte(`def foo():
     x = 1
     return x

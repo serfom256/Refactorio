@@ -1,5 +1,3 @@
-// Package unified provides language-agnostic rename, move, and delete.
-// Language is detected from the file extension.
 package unified
 
 import (
@@ -52,7 +50,6 @@ func detectLang(file string) string {
 	return ""
 }
 
-// Rename renames a symbol declared in `inFile` across the project.
 func Rename(inFile, name, newName, root string) (*edit.Set, error) {
 	inFile, _ = filepath.Abs(inFile)
 	lang := detectLang(inFile)
@@ -76,13 +73,9 @@ func Rename(inFile, name, newName, root string) (*edit.Set, error) {
 	return nil, fmt.Errorf("unsupported file type: %s", filepath.Ext(inFile))
 }
 
-// Move moves a file and updates all imports. The returned warnings
-// flag situations the move cannot safely handle (e.g. Java package-
-// private access that breaks when crossing a package boundary).
 func Move(inFile, toPath, root string) (*edit.Set, []string, error) {
 	inFile, _ = filepath.Abs(inFile)
 	toPath, _ = filepath.Abs(toPath)
-	// If destination is a directory, append the source filename.
 	if info, err := os.Stat(toPath); err == nil && info.IsDir() {
 		toPath = filepath.Join(toPath, filepath.Base(inFile))
 	} else if strings.HasSuffix(toPath, string(filepath.Separator)) {
@@ -135,19 +128,7 @@ func Move(inFile, toPath, root string) (*edit.Set, []string, error) {
 	return nil, nil, fmt.Errorf("unsupported file type: %s", filepath.Ext(inFile))
 }
 
-// Delete removes a file and cleans imports. Returns the edit set and the
-// files that still contain code references to the deleted symbols.
-//
-// The surviving-reference list is computed by the same machinery that backs
-// the usages command rather than by the per-language delete planners. Those
-// could only see files that imported the deleted one, which made the warning
-// wrong in both directions: a dependent whose import was merely cleaned got
-// reported, while a same-package user — which needs no import, and is the
-// commonest case in Java — was never examined at all, so delete could break
-// the build silently.
 func Delete(inFile, root string) (*edit.Set, []string, error) {
-	// Both the index and the usages findings are keyed by absolute path, so
-	// resolve once here rather than comparing a relative path against them.
 	inFile, _ = filepath.Abs(inFile)
 	set, _, err := planDelete(inFile, root)
 	if err != nil {
@@ -156,9 +137,6 @@ func Delete(inFile, root string) (*edit.Set, []string, error) {
 	return set, survivingRefs(inFile, root), nil
 }
 
-// survivingRefs lists files, other than the one being deleted, that still
-// reference a symbol it declares. Import statements do not count: the delete
-// removes them, and the usages layer already excludes them from findings.
 func survivingRefs(inFile, root string) []string {
 	names, err := declaredNames(inFile, root)
 	if err != nil {
@@ -183,7 +161,6 @@ func survivingRefs(inFile, root string) []string {
 	return out
 }
 
-// declaredNames returns the top-level symbols a file declares.
 func declaredNames(file, root string) ([]string, error) {
 	var names []string
 	switch detectLang(file) {
@@ -279,9 +256,6 @@ func declaredNames(file, root string) ([]string, error) {
 	return names, nil
 }
 
-// planDelete builds the edit set for a delete. The second return value is the
-// per-language planner's own reference guess, which Delete discards in favour
-// of survivingRefs.
 func planDelete(inFile, root string) (*edit.Set, []string, error) {
 	inFile, _ = filepath.Abs(inFile)
 	lang := detectLang(inFile)
@@ -345,8 +319,6 @@ func planDelete(inFile, root string) (*edit.Set, []string, error) {
 	return nil, nil, fmt.Errorf("unsupported file type: %s", filepath.Ext(inFile))
 }
 
-// --- Java ---
-
 func renameJava(file, name, newName, root string) (*edit.Set, error) {
 	_, idx, err := javaIndex(root, file)
 	if err != nil {
@@ -362,12 +334,10 @@ func renameJava(file, name, newName, root string) (*edit.Set, error) {
 		fqn = pkg + "." + name
 	}
 
-	// 1. If it's a top-level type → use the precise renameclass op.
 	if idx.LookupFQN(fqn) != nil {
 		return renameclass.Plan(renameclass.Request{FQN: fqn, NewName: newName, Index: idx})
 	}
 
-	// 2. Check if it's a method or field inside a type in this file.
 	for _, td := range fe.Symbols.Types {
 		typeFQN := td.Name
 		if pkg != "" {
@@ -393,7 +363,6 @@ func renameJava(file, name, newName, root string) (*edit.Set, error) {
 }
 
 func moveJava(file, toFile, root string) (*edit.Set, []string, error) {
-	// If destination is a directory, append the source filename.
 	if info, err := os.Stat(toFile); err == nil && info.IsDir() {
 		toFile = filepath.Join(toFile, filepath.Base(file))
 	} else if strings.HasSuffix(toFile, string(filepath.Separator)) {
@@ -436,7 +405,6 @@ func moveJava(file, toFile, root string) (*edit.Set, []string, error) {
 			if dep == nil || dep.Symbols == nil {
 				continue
 			}
-			// Rewrite explicit imports.
 			for _, imp := range dep.Symbols.Imports {
 				if imp.Path == oldFQN {
 					set.Add(edit.Edit{
@@ -445,9 +413,6 @@ func moveJava(file, toFile, root string) (*edit.Set, []string, error) {
 					})
 				}
 			}
-			// Same-package files that ACTUALLY USE the class need an
-			// explicit import now. Only add if the file references the
-			// class name in code (not just in the same package by chance).
 			if dep.Symbols.Package == fe.Symbols.Package && fileUsesIdentifier(path, td.Name) {
 				insertOff := javaInsertionPoint(dep)
 				set.Add(edit.Edit{
@@ -457,8 +422,6 @@ func moveJava(file, toFile, root string) (*edit.Set, []string, error) {
 			}
 		}
 	}
-	// Scan ALL project files for inline FQN references (used without
-	// an import, e.g. `com.foo.Bar x = ...`). Rewrite the full chain.
 	for _, td := range fe.Symbols.Types {
 		oldFQN := td.Name
 		if fe.Symbols.Package != "" {
@@ -482,19 +445,10 @@ func moveJava(file, toFile, root string) (*edit.Set, []string, error) {
 	return set, warnings, nil
 }
 
-// detectAccessWarnings flags Java package-private access that will
-// break when the file moves to a different package. Type-level only:
-//
-//  1. The moved file references a package-private type in its old
-//     package — that type won't be importable from the new package.
-//  2. The moved type itself is package-private and has dependents —
-//     it must become public to be imported after the move.
 func detectAccessWarnings(file string, fe *index.FileEntry, idx *index.Index) []string {
 	var warnings []string
 	oldPkg := fe.Symbols.Package
 
-	// Collect package-private type names declared in the old package
-	// (excluding the moved file's own types).
 	movedNames := map[string]bool{}
 	for _, td := range fe.Symbols.Types {
 		movedNames[td.Name] = true
@@ -511,7 +465,6 @@ func detectAccessWarnings(file string, fe *index.FileEntry, idx *index.Index) []
 		}
 	}
 
-	// Case 1: moved file uses any of those package-private types.
 	if len(pkgPrivateTypes) > 0 {
 		src, err := os.ReadFile(file)
 		if err == nil {
@@ -529,7 +482,6 @@ func detectAccessWarnings(file string, fe *index.FileEntry, idx *index.Index) []
 		}
 	}
 
-	// Case 2: the moved type is package-private and has dependents.
 	for _, td := range fe.Symbols.Types {
 		if td.IsPublic {
 			continue
@@ -556,15 +508,12 @@ func detectAccessWarnings(file string, fe *index.FileEntry, idx *index.Index) []
 	return warnings
 }
 
-// fileUsesIdentifier scans a Java file for any identifier token
-// matching name, excluding import/package declarations.
 func fileUsesIdentifier(path, name string) bool {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
 	tokens := java.Tokenize(src)
-	// Quick parse to get import/package ranges to skip.
 	syms, _ := java.ExtractSymbols(src)
 	for _, tok := range tokens {
 		if tok.Kind != java.TIdent || tok.Text != name {
@@ -619,8 +568,6 @@ func deleteJava(file, root string) (*edit.Set, []string, error) {
 	set.AddDelete(file, "delete file")
 	return set, refs, nil
 }
-
-// --- Kotlin ---
 
 func renameKotlin(file, name, newName, root string) (*edit.Set, error) {
 	p, err := detectProject(root, file)
@@ -700,8 +647,6 @@ func deleteKotlin(file, root string) (*edit.Set, []string, error) {
 	return set, nil, nil
 }
 
-// --- Go ---
-
 func renameGo(file, name, newName, root string) (*edit.Set, error) {
 	idx, err := goIndex(root)
 	if err != nil {
@@ -711,8 +656,6 @@ func renameGo(file, name, newName, root string) (*edit.Set, error) {
 	return gorename.PlanRename(gorename.RenameRequest{Package: pkg, Symbol: name, NewName: newName, Index: idx})
 }
 
-// --- TS ---
-
 func renameTS(file, name, newName, root string) (*edit.Set, error) {
 	idx, err := tsIndex(root)
 	if err != nil {
@@ -720,8 +663,6 @@ func renameTS(file, name, newName, root string) (*edit.Set, error) {
 	}
 	return tsrename.PlanRename(tsrename.RenameRequest{File: file, Symbol: name, NewName: newName, Index: idx})
 }
-
-// --- shared helpers ---
 
 func detectProject(root, file string) (*project.Project, error) {
 	start := root
@@ -794,22 +735,6 @@ func javaInsertionPoint(fe *index.FileEntry) int {
 	return 0
 }
 
-// renameByToken is a generic token-scan rename for Java/Kotlin.
-//
-// Critical safety rule: we only rename identifiers in files where we
-// are CONFIDENT the name refers to the target, not to some other
-// symbol with the same name (e.g. java.lang.Class vs our Class).
-//
-// Confidence tiers:
-//   - Declaring file: rename all matches (we defined it here)
-//   - Explicit import (`import com.foo.Bar`): rename all matches
-//     (the import proves the name refers to our target)
-//   - Same-package / wildcard import: SKIP identifier renames
-//     (bare `Class` might be java.lang.Class, not ours)
-//
-// This is conservative — same-package references to unique names
-// like `FooBarHelper` would be safe to rename but we skip them
-// anyway. The user can do a second pass for those files.
 func renameByToken(file, name, newName, fqn string, idx *index.Index, p *project.Project) (*edit.Set, error) {
 	set := edit.NewSet()
 	newFQN := strings.TrimSuffix(fqn, "."+name) + "." + newName
@@ -833,7 +758,6 @@ func renameByToken(file, name, newName, fqn string, idx *index.Index, p *project
 		hasExplicitImport := fileHasExplicitImport(fe, fqn)
 		isSamePackage := fe.Symbols.Package == declPkg && !isDeclFile
 
-		// Rewrite explicit imports regardless.
 		for _, imp := range fe.Symbols.Imports {
 			if imp.Path == fqn && !imp.IsWildcard {
 				set.Add(edit.Edit{
@@ -843,11 +767,7 @@ func renameByToken(file, name, newName, fqn string, idx *index.Index, p *project
 			}
 		}
 
-		// Only scan identifiers in files where we're confident.
 		if !isDeclFile && !hasExplicitImport {
-			// Same-package and wildcard files: skip identifier renames
-			// to avoid collisions with java.lang.* or other same-named
-			// symbols. Log for dry-run awareness.
 			if isSamePackage {
 				continue
 			}
@@ -872,9 +792,6 @@ func renameByToken(file, name, newName, fqn string, idx *index.Index, p *project
 		}
 	}
 
-	// Scan ALL project files for inline fully-qualified references
-	// like `com.foo.Bar` used without an import. These don't show up
-	// in FilesImporting() because there's no import statement.
 	for _, fe := range idx.Files() {
 		if fe.Err != nil || fe.Symbols == nil {
 			continue
@@ -887,7 +804,6 @@ func renameByToken(file, name, newName, fqn string, idx *index.Index, p *project
 		renameFQNReferences(fe.Path, tokens, fqn, newName, fe, set)
 	}
 
-	// Rename the file if it matches the old name.
 	oldBase := filepath.Base(file)
 	if oldBase == name+".java" {
 		newFile := filepath.Join(filepath.Dir(file), newName+".java")
@@ -919,46 +835,7 @@ func inJavaImport(tok java.Token, syms *java.FileSymbols) bool {
 	return false
 }
 
-// RenamePackage renames a package across the project. Detects language
-// from the package path format or from files in the directory.
 func RenamePackage(from, to, root string) (*edit.Set, error) {
-	// Try Java/Kotlin first (dotted package names like com.foo).
-	if strings.Contains(from, ".") {
-		// Could be Java or Kotlin. Try Java first.
-		p, err := detectProjectFromRoot(root)
-		if err == nil {
-			// Try Java.
-			jIdx, err := index.Build(p, ".java")
-			if err == nil {
-				files := jIdx.FilesInPackage(from)
-				if len(files) > 0 {
-					return javaRenamePackage(from, to, p)
-				}
-			}
-			// Try Kotlin.
-			kIdx, err := ktrename.BuildIndex(p)
-			if err == nil {
-				if len(kIdx.FilesInPkg(from)) > 0 {
-					return ktrename.PlanRenamePackage(ktrename.RenamePackageRequest{
-						OldPackage: from, NewPackage: to, Index: kIdx,
-					})
-				}
-			}
-		}
-		// The project owns no sources in this package, so this is a rename of
-		// an external one: a dependency's package, or javax.* -> jakarta.*.
-		// Rewrite the references and move nothing.
-		if p != nil {
-			set, refs, err := planExternalPackageRename(from, to, p)
-			if err == nil && refs > 0 {
-				return set, nil
-			}
-		}
-		return nil, fmt.Errorf("no files found in package %q, and no references to it either "+
-			"(a package with sources in the project is moved; one without is rewritten in place)", from)
-	}
-
-	// Go import path (contains /).
 	if strings.Contains(from, "/") {
 		idx, err := goIndex(root)
 		if err != nil {
@@ -969,7 +846,44 @@ func RenamePackage(from, to, root string) (*edit.Set, error) {
 		})
 	}
 
-	return nil, fmt.Errorf("could not determine language for package %q — use dotted (Java/Kotlin) or slash-separated (Go) format", from)
+	p, err := detectProjectFromRoot(root)
+	if err != nil {
+		return nil, err
+	}
+
+	jIdx, jErr := index.Build(p, ".java")
+	if jErr == nil && len(jIdx.FilesInPackage(from)) > 0 {
+		return javaRenamePackage(from, to, p)
+	}
+	if kIdx, err := ktrename.BuildIndex(p); err == nil {
+		if len(kIdx.FilesInPkg(from)) > 0 {
+			return ktrename.PlanRenamePackage(ktrename.RenamePackageRequest{
+				OldPackage: from, NewPackage: to, Index: kIdx,
+			})
+		}
+	}
+
+	if set, refs, err := planExternalPackageRename(from, to, p); err == nil && refs > 0 {
+		return set, nil
+	}
+
+	return nil, fmt.Errorf("no files declare package %q, and nothing references it\n"+
+		"  searched %s (%s): %s\n"+
+		"  run `refactorio doctor` to see every module and file Refactorio can reach",
+		from, p.Root, p.Kind, describeScope(p))
+}
+
+func describeScope(p *project.Project) string {
+	roots := 0
+	for _, m := range p.Modules {
+		roots += len(m.SourceRoots)
+	}
+	files, err := p.SourceFiles(".java", ".kt", ".kts")
+	if err != nil {
+		return fmt.Sprintf("%d modules, %d source roots", len(p.Modules), roots)
+	}
+	return fmt.Sprintf("%d modules, %d source roots, %d Java/Kotlin files",
+		len(p.Modules), roots, len(files))
 }
 
 func detectProjectFromRoot(root string) (*project.Project, error) {
@@ -987,8 +901,6 @@ func javaRenamePackage(from, to string, p *project.Project) (*edit.Set, error) {
 	}
 	return renamepkg.Plan(renamepkg.Request{OldPackage: from, NewPackage: to, Index: idx})
 }
-
-// --- Rust ---
 
 func renameRust(file, name, newName, root string) (*edit.Set, error) {
 	idx, err := rustIndex(root)
@@ -1038,7 +950,6 @@ func pythonIndex(root string) (*python.Index, error) {
 	return python.BuildIndex(abs)
 }
 
-// Keep kotlin and typescript imported.
 var (
 	_ = kotlin.Tokenize
 	_ = typescript.Tokenize

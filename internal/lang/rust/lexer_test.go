@@ -63,7 +63,6 @@ func TestTokenize_Lifetime(t *testing.T) {
 }
 
 func TestTokenize_LifetimeVsChar(t *testing.T) {
-	// 'a' is a char, 'a is a lifetime — must not confuse.
 	tokens := Tokenize([]byte("let c = 'a'; fn f<'a>() {}"))
 	chars := filterKind(tokens, TChar)
 	lifetimes := filterKind(tokens, TLifetime)
@@ -172,11 +171,10 @@ func TestIsValidIdentifier(t *testing.T) {
 		{"foo", true},
 		{"_foo", true},
 		{"foo_bar", true},
-		{"foo123", false}, // actually valid in Rust
+		{"foo123", false},
 		{"123foo", false},
 		{"foo-bar", false},
 	}
-	// foo123 IS valid — fix the test case
 	cases[4].want = true
 	for _, tc := range cases {
 		if got := IsValidIdentifier(tc.in); got != tc.want {

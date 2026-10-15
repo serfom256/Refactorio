@@ -1,4 +1,3 @@
-// Package rust provides Rust lexing and symbol extraction.
 package rust
 
 import (
@@ -21,9 +20,9 @@ const (
 )
 
 const (
-	TRawStr   TokenKind = common.TLangSpecific + iota // r"...", r#"..."#, r##"..."##
-	TChar                                             // 'x', '\n'
-	TLifetime                                         // 'a, 'static
+	TRawStr TokenKind = common.TLangSpecific + iota
+	TChar
+	TLifetime
 )
 
 type Token struct {
@@ -51,7 +50,6 @@ var rustKeywords = map[string]struct{}{
 	"return": {}, "self": {}, "Self": {}, "static": {}, "struct": {},
 	"super": {}, "trait": {}, "true": {}, "type": {}, "unsafe": {},
 	"use": {}, "where": {}, "while": {}, "yield": {},
-	// edition 2018+
 	"abstract": {}, "become": {}, "box": {}, "do": {}, "final": {},
 	"macro": {}, "override": {}, "priv": {}, "try": {}, "typeof": {},
 	"unsized": {}, "virtual": {},
@@ -135,7 +133,7 @@ func (l *lexer) next() (Token, bool) {
 	case c == 'b' && l.peek(1) == '"':
 		return l.byteString(start)
 	case c == 'b' && l.peek(1) == '\'':
-		l.pos++ // skip b
+		l.pos++
 		return l.charLiteral(start)
 	case c == '"':
 		return l.stringLiteral(start)
@@ -154,8 +152,6 @@ func (l *lexer) next() (Token, bool) {
 	}
 }
 
-// isLifetime distinguishes 'a (lifetime) from 'x' (char literal).
-// A lifetime is ' followed by an identifier, NOT followed by '.
 func (l *lexer) isLifetime() bool {
 	if l.pos+1 >= len(l.src) {
 		return false
@@ -164,19 +160,18 @@ func (l *lexer) isLifetime() bool {
 	if !isIdentStart(rune(next)) {
 		return false
 	}
-	// Scan ahead past the identifier to check if it ends with '.
 	i := l.pos + 2
 	for i < len(l.src) && isIdentContinue(rune(l.src[i])) {
 		i++
 	}
 	if i < len(l.src) && l.src[i] == '\'' {
-		return false // 'x' is a char literal
+		return false
 	}
 	return true
 }
 
 func (l *lexer) lifetime(start int) (Token, bool) {
-	l.pos++ // skip '
+	l.pos++
 	for l.pos < len(l.src) && isIdentContinue(rune(l.src[l.pos])) {
 		l.pos++
 	}
@@ -192,7 +187,7 @@ func (l *lexer) lineComment(start int) (Token, bool) {
 
 func (l *lexer) blockComment(start int) (Token, bool) {
 	l.pos += 2
-	depth := 1 // Rust supports nested /* */ comments
+	depth := 1
 	for l.pos+1 < len(l.src) && depth > 0 {
 		if l.src[l.pos] == '/' && l.src[l.pos+1] == '*' {
 			depth++
@@ -227,27 +222,24 @@ func (l *lexer) stringLiteral(start int) (Token, bool) {
 }
 
 func (l *lexer) byteString(start int) (Token, bool) {
-	l.pos++ // skip b
+	l.pos++
 	return l.stringLiteral(start)
 }
 
-// rawString handles r"...", r#"..."#, r##"..."##, etc.
 func (l *lexer) rawString(start int) (Token, bool) {
-	l.pos++ // skip r
+	l.pos++
 	hashes := 0
 	for l.pos < len(l.src) && l.src[l.pos] == '#' {
 		hashes++
 		l.pos++
 	}
 	if l.pos >= len(l.src) || l.src[l.pos] != '"' {
-		// Not a raw string — backtrack. This is `r` as an identifier.
 		l.pos = start
 		return l.identifier(start)
 	}
-	l.pos++ // skip "
+	l.pos++
 	for l.pos < len(l.src) {
 		if l.src[l.pos] == '"' {
-			// Check for matching number of trailing #.
 			match := true
 			for j := 0; j < hashes; j++ {
 				if l.pos+1+j >= len(l.src) || l.src[l.pos+1+j] != '#' {
@@ -266,7 +258,7 @@ func (l *lexer) rawString(start int) (Token, bool) {
 }
 
 func (l *lexer) charLiteral(start int) (Token, bool) {
-	l.pos++ // skip '
+	l.pos++
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
 		if c == '\\' && l.pos+1 < len(l.src) {
@@ -337,7 +329,6 @@ func (l *lexer) number(start int) (Token, bool) {
 }
 
 func (l *lexer) consumeSuffix() {
-	// Rust type suffixes: i8, u32, f64, usize, isize, etc.
 	if l.pos < len(l.src) && (l.src[l.pos] == 'i' || l.src[l.pos] == 'u' || l.src[l.pos] == 'f') {
 		for l.pos < len(l.src) && isIdentContinue(rune(l.src[l.pos])) {
 			l.pos++
@@ -353,7 +344,6 @@ func (l *lexer) identifier(start int) (Token, bool) {
 		}
 		l.pos += w
 	}
-	// Rust raw identifiers: r#keyword
 	return l.emit(TIdent, start), true
 }
 

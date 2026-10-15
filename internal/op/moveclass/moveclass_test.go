@@ -57,11 +57,9 @@ public class Bar { int x; }
 	if err := set.Apply(); err != nil {
 		t.Fatal(err)
 	}
-	// Old file must be gone.
 	if _, err := os.Stat(filepath.Join(root, "src/main/java/com/foo/Bar.java")); !os.IsNotExist(err) {
 		t.Errorf("old file still exists: %v", err)
 	}
-	// New file must exist with rewritten package.
 	newFile := filepath.Join(root, "src/main/java/com/qux/Bar.java")
 	got := read(t, newFile)
 	if !strings.Contains(got, "package com.qux;") {
@@ -97,8 +95,6 @@ public class User { Bar b; }
 }
 
 func TestMoveClass_SamePackageGetsImportAdded(t *testing.T) {
-	// Sibling lives in com.foo and used Bar with same-package access.
-	// After moving Bar to com.qux, Sibling must `import com.qux.Bar`.
 	idx, root := mk(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -140,7 +136,6 @@ public class User { Bar b; }
 		t.Fatal(err)
 	}
 	user := read(t, filepath.Join(root, "src/main/java/com/app/User.java"))
-	// Wildcard should stay; explicit import added.
 	if !strings.Contains(user, "import com.foo.*;") {
 		t.Errorf("wildcard import was modified:\n%s", user)
 	}
@@ -150,10 +145,6 @@ public class User { Bar b; }
 }
 
 func TestMoveClass_FileInNewPackageGetsNothingExtra(t *testing.T) {
-	// User in com.qux had `import com.foo.Bar`. After Bar moves to
-	// com.qux, the import gets rewritten to `import com.qux.Bar`
-	// (technically redundant since they're now in the same package,
-	// but harmless and simpler than removing it).
 	idx, root := mk(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -175,7 +166,6 @@ public class User { Bar b; }
 	if !strings.Contains(user, "import com.qux.Bar;") {
 		t.Errorf("import not rewritten:\n%s", user)
 	}
-	// Should NOT contain duplicate imports.
 	count := strings.Count(user, "import com.qux.Bar;")
 	if count != 1 {
 		t.Errorf("got %d imports, want 1:\n%s", count, user)
@@ -232,11 +222,9 @@ public class User { Bar b; }
 	if err := set.Apply(); err != nil {
 		t.Fatal(err)
 	}
-	// Old file gone.
 	if _, err := os.Stat(filepath.Join(root, "lib/src/main/java/com/foo/Bar.java")); !os.IsNotExist(err) {
 		t.Errorf("old file still exists: %v", err)
 	}
-	// New file in the SAME source root (lib/), under the new package directory.
 	newFile := filepath.Join(root, "lib/src/main/java/com/qux/Bar.java")
 	if _, err := os.Stat(newFile); err != nil {
 		t.Errorf("new file missing: %v", err)

@@ -199,9 +199,7 @@ the working directory or 'root=<dir>').`,
 	})
 }
 
-// applyWithHistory snapshots the edit set, applies it, then saves
-// the snapshot under the project-scoped history directory.
-func applyWithHistory(set *edit.Set, args *cli.Args, stdout io.Writer) error {
+func ApplyWithHistory(set *edit.Set, args *cli.Args, stdout io.Writer) error {
 	command := rebuildCommand(args)
 	projectRoot := resolveProjectRoot(args)
 	cs, err := history.Snapshot(set, command, projectRoot)
@@ -217,8 +215,6 @@ func applyWithHistory(set *edit.Set, args *cli.Args, stdout io.Writer) error {
 	return nil
 }
 
-// resolveProjectRoot uses the `root=` arg if present, otherwise the
-// working directory, then walks up for a project marker.
 func resolveProjectRoot(args *cli.Args) string {
 	start, _ := args.Get("root")
 	if start == "" {
@@ -231,7 +227,6 @@ func rebuildCommand(args *cli.Args) string {
 	return args.Subcommand + " " + strings.Join(args.RawPairs(), " ")
 }
 
-// HandleUsages: `refactorio usages in=<file> name=<symbol> [format=text|json] [root=<dir>]`
 func HandleUsages(args *cli.Args, stdout, stderr io.Writer) error {
 	inFile, err := args.Require("in")
 	if err != nil {
@@ -253,7 +248,6 @@ func HandleUsages(args *cli.Args, stdout, stderr io.Writer) error {
 		return fmt.Errorf("unknown arguments: %v", unknown)
 	}
 
-	// usages is read-only, so it records language and outcome but no lines.
 	stats.NoteContext(detectLang(inFile), false)
 
 	result, err := usages.Find(inFile, name, rootArg, Rename)
@@ -301,7 +295,6 @@ func HandleHistory(args *cli.Args, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// HandleRename: `refactorio rename in=<file> name=<symbol> to=<newName> [root=<dir>] [dry-run=true]`
 func HandleRename(args *cli.Args, stdout, stderr io.Writer) error {
 	inFile, err := args.Require("in")
 	if err != nil {
@@ -339,14 +332,13 @@ func HandleRename(args *cli.Args, stdout, stderr io.Writer) error {
 		_, _ = io.WriteString(stdout, out)
 		return nil
 	}
-	if err := applyWithHistory(set, args, stdout); err != nil {
+	if err := ApplyWithHistory(set, args, stdout); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "%d files modified, %d edits\n", len(set.Files()), set.Len())
 	return nil
 }
 
-// HandleMove: `refactorio move in=<file> to=<newPath> [root=<dir>] [dry-run=true]`
 func HandleMove(args *cli.Args, stdout, stderr io.Writer) error {
 	inFile, err := args.Require("in")
 	if err != nil {
@@ -381,7 +373,7 @@ func HandleMove(args *cli.Args, stdout, stderr io.Writer) error {
 		_, _ = io.WriteString(stdout, out)
 		return nil
 	}
-	if err := applyWithHistory(set, args, stdout); err != nil {
+	if err := ApplyWithHistory(set, args, stdout); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "%d files modified, %d edits, %d moves\n",
@@ -400,7 +392,6 @@ func printWarnings(w io.Writer, warnings []string) {
 	fmt.Fprintln(w)
 }
 
-// HandleDelete: `refactorio delete in=<file> [root=<dir>] [dry-run=true]`
 func HandleDelete(args *cli.Args, stdout, stderr io.Writer) error {
 	inFile, err := args.Require("in")
 	if err != nil {
@@ -435,20 +426,17 @@ func HandleDelete(args *cli.Args, stdout, stderr io.Writer) error {
 		printSurvivingRefs(stdout, refs)
 		return nil
 	}
-	// Deleting a file that is still referenced leaves the project unable to
-	// compile. Refuse by default rather than reporting it after the fact.
 	if len(refs) > 0 && !force {
 		printSurvivingRefs(stdout, refs)
 		return fmt.Errorf("refusing to delete: %d file(s) still reference it — fix those, or re-run with force=true", len(refs))
 	}
-	if err := applyWithHistory(set, args, stdout); err != nil {
+	if err := ApplyWithHistory(set, args, stdout); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "deleted, cleaned %d files\n", set.Len())
 	return nil
 }
 
-// HandleRenamePackage: `refactorio rename-package in=<dir> to=<newName> [root=<dir>] [dry-run=true]`
 func HandleRenamePackage(args *cli.Args, stdout, stderr io.Writer) error {
 	from, err := args.Require("from")
 	if err != nil {
@@ -482,7 +470,7 @@ func HandleRenamePackage(args *cli.Args, stdout, stderr io.Writer) error {
 		_, _ = io.WriteString(stdout, out)
 		return nil
 	}
-	if err := applyWithHistory(set, args, stdout); err != nil {
+	if err := ApplyWithHistory(set, args, stdout); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "%d files modified, %d edits, %d moves\n",
@@ -490,9 +478,6 @@ func HandleRenamePackage(args *cli.Args, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// printSurvivingRefs reports the files that still reference a deleted symbol.
-// Naming them matters: the warning is a to-do list for manual cleanup, and a
-// bare count gives the reader no way to check it or act on it.
 func printSurvivingRefs(w io.Writer, refs []string) {
 	if len(refs) == 0 {
 		return

@@ -56,7 +56,6 @@ func TestTokenize_InterpolatedString(t *testing.T) {
 }
 
 func TestTokenize_InterpolatedEscapedBrace(t *testing.T) {
-	// {{ and }} are literal { and } inside $"..."
 	tokens := Tokenize([]byte(`var s = $"literal {{ brace }}";`))
 	interps := filterKind(tokens, TInterpolated)
 	if len(interps) == 0 {
@@ -141,7 +140,6 @@ func TestTokenize_NumericSuffix(t *testing.T) {
 }
 
 func TestTokenize_AtIdentifier(t *testing.T) {
-	// @class is an identifier (escape keyword)
 	tokens := Tokenize([]byte("var @class = 1;"))
 	idents := filterKind(tokens, TIdent)
 	found := false
@@ -173,7 +171,7 @@ func TestIsValidIdentifier(t *testing.T) {
 		{"", false},
 		{"foo", true},
 		{"_foo", true},
-		{"@class", true}, // escaped keyword
+		{"@class", true},
 		{"foo123", true},
 		{"123foo", false},
 		{"foo-bar", false},

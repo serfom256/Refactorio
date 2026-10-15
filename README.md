@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="icon/refactorio.png" alt="Refactorio" width="150">
+</p>
+
 # Refactorio
 
 A cross-file refactoring CLI for Java, Kotlin, Go, TypeScript, JavaScript, Rust, C#, and Python 3 projects. Pure Go, zero dependencies, no LSP or compiler required.
@@ -7,7 +11,7 @@ Refactorio uses hand-rolled lexers and convention-based rules to find and rename
 ## Contents
 
 - [Installation](#installation) · [Supported languages](#supported-languages) · [Commands](#commands)
-- Commands in detail: [rename](#rename) · [move](#move) · [delete](#delete) · [usages](#usages) · [rename-package](#rename-package) · [stats](#stats)
+- Commands in detail: [rename](#rename) · [move](#move) · [delete](#delete) · [usages](#usages) · [rename-package](#rename-package) · [clean-comments](#clean-comments) · [stats](#stats) · [doctor](#doctor)
 - [Arguments reference](#arguments-reference) · [Rollback](#rollback) · [Dry run](#dry-run)
 - [Per-language limitations](#per-language-limitations) — read this before trusting a rename
 - [Multi-module support](#multi-module-project-support) · [Adding a language](#adding-a-new-language) · [Architecture](#architecture)
@@ -85,8 +89,13 @@ Language is auto-detected from the file extension. Each command supports `--help
 | `rollback` | Undo the last refactoring operation (per-project) | `rollback` |
 | `stats` | Show how Refactorio itself has been used (local, private) | `stats [scope=project\|all] [since=7d]` |
 | `history` | List recent refactoring operations (per-project) | `history` |
+| `doctor` | Report the detected project: modules, source roots, file counts | `doctor [root=<dir>]` |
+| `clean-comments` | Remove comments that restate the code, and commented-out code | `clean-comments in=<path> [mode=report\|apply]` |
 
-All commands support `dry-run=true` to preview changes and `root=<dir>` to override the project root.
+All commands support `dry-run=true` to preview changes and `root=<dir>` to override where project
+detection starts. `root=` is a starting point, not a scope limit: detection climbs to the outermost
+project root at or above it (stopping at the enclosing VCS root), so a refactor started inside one
+module still sees the sibling modules that reference its code.
 
 ---
 
@@ -361,6 +370,82 @@ Note: TypeScript/JavaScript and Rust do not have a package-rename equivalent —
 
 ---
 
+## clean-comments
+
+Removes the comments from a file or directory tree, on the premise that code
+should document itself. Reports by default and writes nothing until
+`mode=apply`.
+
+```bash
+refactorio clean-comments in=src                # report
+refactorio clean-comments in=src mode=apply     # remove them
+```
+
+```
+1052 comments in 102 files: 1049 to remove, 3 kept
+
+kept:
+  internal/op/cleancomments/cli.go:206  (directive)   //nolint:nilerr // an unreadable...
+  internal/op/doctor/doctor.go:153      (directive)   //nolint:nilerr // an unreadable...
+  internal/project/discover.go:29       (directive)   //nolint:nilerr // see comment
+
+to remove:
+  internal/edit/edit.go          28 comments, 72 lines
+  internal/cli/dispatch.go       14 comments, 21 lines
+  ...
+```
+
+### What is kept
+
+Three things, and none of them is a judgement about whether the prose is any
+good:
+
+| Kept | Why |
+|---|---|
+| **Directives** | `//go:embed`, `//nolint`, `# noqa`, `// +build`, `eslint-*`, `@ts-*`, `#!`, `// Code generated … DO NOT EDIT` — an instruction to the build, not documentation. Removing one changes what the build does. |
+| **Licence headers** | copyright, licence and SPDX notices. Removing them is a legal question, not a style one. |
+| **TODO/FIXME** | a backlog item rather than documentation. Deleting it deletes the item. |
+
+Everything else goes: doc comments, Python docstrings, commented-out code,
+section banners, trailing comments, why-comments. There are no categories and
+no threshold to tune — `in=` is the only thing to decide.
+
+A directive or a TODO always forms its own block, so it survives even when the
+prose directly above it does not:
+
+```go
+// Kind is a kind.                      ← removed
+//go:generate stringer -type=Kind       ← kept
+type Kind int
+```
+
+Both matchers are anchored to the start of the comment, so a comment that
+merely mentions one is prose: `// a TODO is an item on a list` goes, while
+`// TODO: handle this` stays.
+
+### What it will not break
+
+- **Strings that look like comments.** `"https://example.com"`, a regex
+  literal containing `//`, and every `#` inside a Python f-string are left
+  alone, because the per-language lexers already separate a comment from a
+  string. `sed -i 's|//.*||'` corrupts all three.
+- **Python blocks.** A docstring that is the entire body of a `def` or `class`
+  is kept: Python has no empty block, so removing it would stop the file
+  parsing.
+- **Paragraphs.** Consecutive line comments are removed as one unit, never
+  half of one.
+- **Layout.** Removal takes whole lines, and a comment that sat between two
+  blank lines takes one of them, so no double blank is left behind.
+
+Running a formatter afterwards is worth it in languages that align trailing
+comments: stripping them from a `const` block leaves the padding `gofmt` had
+added for them. The removal itself is correct; only the alignment is stale.
+
+Applied runs go through the normal history, so [`rollback`](#rollback) undoes
+a cleaning pass like any other refactor.
+
+---
+
 ## stats
 
 Reports how Refactorio itself has been used: which commands ran, which
@@ -430,6 +515,47 @@ that the older half is dropped.
 
 ---
 
+## doctor
+
+Reports the project model every other command works from. Run it when a
+command finds nothing, or touches fewer files than expected.
+
+```bash
+refactorio doctor
+```
+
+```
+project root /home/me/work/intentflow
+build system gradle
+modules      12 (11 with source roots, 21 source roots in total)
+
+module                                                 roots  files
+<root>                                                     0      0
+:intentflow-core                                           3    213
+:intentflow-spring-boot-starter                            2     12
+:intentflow-dialects:intentflow-mysql                      2      4
+...
+
+indexed files: java 308
+```
+
+Two things to read it for:
+
+- **A module missing from the list** is a module no refactor will reach. The
+  usual cause is a source layout off the convention path — see
+  [Multi-module project support](#multi-module-project-support).
+- **`warning: no source roots found`** means no code is visible at all.
+
+For a project with no Gradle or Maven build, the command reports the file
+census instead; the Go, TypeScript, Rust, C# and Python operations index from a
+directory and need no build model.
+
+Reaching for different `root=` values is not a fix. `root=` only says where
+detection starts, and detection climbs to the outermost project root from
+there, so pointing at a submodule does not narrow the search.
+
+---
+
 ## Rollback
 
 Every refactoring operation is automatically saved to `~/.refactorio/projects/<hash>/history/` (per-project — the hash is derived from the absolute project root). If you make a mistake, undo it:
@@ -492,13 +618,13 @@ without losing a single edit location.
 | Field rename with shadow detection (skips shadowed bare references) | Generic/array/qualified types not recognized by type scanner |
 | Constructor rename when class is renamed | Reflection (`Class.forName(...)`) and annotation strings not detected |
 | Annotation types (`@interface`) — rename, move, delete, usages, rename-package; `@Foo` usage sites renamed too | Nested types (inner classes, nested `@interface`) are not indexed as types |
-| Inline FQN references (`com.foo.Bar x`) renamed/rewritten on move | Non-standard Gradle source roots not detected |
-| Import rewriting (explicit, static, wildcard) | Programmatic Gradle includes invisible |
+| Inline FQN references (`com.foo.Bar x`) renamed/rewritten on move | Custom Gradle `srcDirs` outside `src/<sourceSet>/<java\|kotlin>` not detected |
+| Import rewriting (explicit, static, wildcard) | `module-info.java` not updated — a renamed package leaves `exports`/`opens` stale |
 | Move class across packages (same-package files get imports added) | |
 | Package-private access warning on move (type-level) | Member-level access (package-private methods/fields) not tracked |
 | Delete class + import cleanup | |
-| Rename entire package | |
-| Multi-module Gradle and Maven projects | |
+| Rename entire package, including its `package-info.java` (annotations and javadoc move with it) | |
+| Multi-module Gradle and Maven projects, including modules registered programmatically in `settings.gradle.kts` | |
 | Strings, comments, text blocks correctly excluded | |
 
 ### Kotlin
@@ -596,9 +722,33 @@ without losing a single edit location.
 
 ## Multi-Module Project Support
 
-**Gradle** — reads `settings.gradle` or `settings.gradle.kts` for `include ':app'`, `include(":lib:core")` patterns. Both Groovy and Kotlin DSL supported.
+Detection climbs to the **outermost** project root at or above the starting directory, stopping at the enclosing VCS root (`.git`, `.hg`, `.svn`). This matters: a Gradle submodule has its own `build.gradle.kts` and a Maven submodule its own `pom.xml`, so the *nearest* build file is usually the submodule — and a refactor scoped to one module cannot see the siblings that reference its code. It would rewrite the declaring module, report success, and leave the siblings uncompilable.
+
+**Gradle** — reads `settings.gradle` or `settings.gradle.kts`. Both Groovy and Kotlin DSL are supported, including argument lists that span lines:
+
+```kotlin
+include(
+    "core",
+    "starter",
+)
+```
 
 **Maven** — reads `pom.xml` for `<modules>` and recurses into child poms.
+
+**Modules the build script hides** — build scripts are read, not executed, so a module registered programmatically is invisible to the parser:
+
+```kotlin
+listOf("mysql", "postgres").forEach {
+    include(it)
+    project(":$it").projectDir = file("dialects/$it")
+}
+```
+
+After parsing, the filesystem is swept for any directory holding a conventional source root that the parser did not report, and the union is what refactors operate on. Build output (`build`, `target`, `out`, `bin`, `dist`, `node_modules`) and dot-directories are never searched.
+
+**Source sets** — every `src/<sourceSet>/<java|kotlin>` directory is a source root, not just `main` and `test`. `src/testFixtures/java` (the `java-test-fixtures` plugin) and hand-rolled sets like `src/integrationTest/java` hold code that references the rest of the project, so a rename that skipped them would break the build. A source set whose name contains "test" is marked as test code.
+
+Run [`doctor`](#doctor) to see exactly which modules and files were found.
 
 **Go modules** — reads `go.mod` for the module path. All `.go` files under the module root are indexed (excluding `vendor`, `testdata`).
 
@@ -629,10 +779,10 @@ without losing a single edit location.
 ## Architecture
 
 ```
-cmd/refactorio/main.go             CLI entry (8 commands: rename, move, delete, rename-package, usages, rollback, history, stats)
+cmd/refactorio/main.go             CLI entry (10 commands: rename, move, delete, rename-package, usages, rollback, history, stats, doctor, clean-comments)
 internal/cli/                      key=value arg parser + subcommand dispatch + --help system
 internal/edit/                     Edit/Move/Delete sets, atomic apply, dry-run
-internal/project/                  Java/Kotlin project detection (Gradle/Maven)
+internal/project/                  Java/Kotlin project detection (Gradle/Maven) + filesystem module discovery
 internal/index/                    Java project-wide symbol index
 internal/history/                  Per-project undo/rollback history (~/.refactorio/projects/<hash>/)
 internal/stats/                    Local usage statistics (~/.refactorio/stats.jsonl)
@@ -648,6 +798,8 @@ internal/lang/
 internal/op/
   unified/                         Unified rename/move/delete dispatcher + FQN scanner + external package rename
   usages/                          Read-only find-usages (drives the rename layer)
+  doctor/                          Reports the detected project model (modules, source roots, files)
+  cleancomments/                   Comment classifier + removal (deny-list, categories, confidence)
   refs/                            Shared dangling-reference check used by delete
   renameclass/                     Java class rename logic (position-aware)
   renamemethod/                    Java method rename logic (receiver-typed)
@@ -669,7 +821,7 @@ internal/op/
 go test ./...
 ```
 
-404 tests across 28 packages. No external tools or services required — no cgo, no network, no LSP.
+435 tests across 30 packages. No external tools or services required — no cgo, no network, no LSP.
 
 ## License
 

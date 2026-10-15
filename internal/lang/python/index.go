@@ -7,11 +7,10 @@ import (
 	"sync"
 )
 
-// Index holds the project-wide view of Python source.
 type Index struct {
 	Root     string
 	files    map[string]*FileEntry
-	byModule map[string][]string // module path → files
+	byModule map[string][]string
 	bySymbol map[string][]*SymbolRef
 }
 
@@ -27,8 +26,6 @@ type SymbolRef struct {
 	ModulePath string
 }
 
-// BuildIndex walks root for .py files, excluding venv directories,
-// __pycache__, .git, build/, dist/, and similar non-source paths.
 func BuildIndex(root string) (*Index, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -119,15 +116,6 @@ func (idx *Index) buildLookups() {
 	}
 }
 
-// FileToModulePath computes the Python module path for a file based
-// on its directory layout relative to the index root.
-//
-// Conventions:
-//
-//	foo.py                → "foo"
-//	foo/__init__.py       → "foo"
-//	foo/bar.py            → "foo.bar"
-//	foo/bar/__init__.py   → "foo.bar"
 func (idx *Index) FileToModulePath(file string) string {
 	rel, err := filepath.Rel(idx.Root, file)
 	if err != nil {
@@ -143,9 +131,6 @@ func (idx *Index) FileToModulePath(file string) string {
 	return strings.ReplaceAll(rel, "/", ".")
 }
 
-// ModulePathToFile resolves a Python module path to a file path
-// within the index. Tries `<root>/<path>.py` then
-// `<root>/<path>/__init__.py`.
 func (idx *Index) ModulePathToFile(modulePath string) string {
 	rel := strings.ReplaceAll(modulePath, ".", "/")
 	candidates := []string{
@@ -170,12 +155,6 @@ func (idx *Index) AllFiles() []string {
 	return out
 }
 
-// FilesUsing returns files whose imports could resolve the symbol
-// declared in (modulePath, symbolName). Covers:
-//
-//	import modulePath               → uses modulePath.symbolName
-//	from modulePath import symbolName
-//	from modulePath import *
 func (idx *Index) FilesUsing(modulePath, symbolName string) []string {
 	seen := map[string]struct{}{}
 	for path, fe := range idx.files {
@@ -184,7 +163,6 @@ func (idx *Index) FilesUsing(modulePath, symbolName string) []string {
 		}
 		for _, imp := range fe.Symbols.Imports {
 			if imp.IsFrom && imp.Path == modulePath {
-				// from modulePath import X / X as Y / *
 				for _, n := range imp.Names {
 					if n.Name == symbolName || n.Name == "*" {
 						seen[path] = struct{}{}
@@ -194,7 +172,6 @@ func (idx *Index) FilesUsing(modulePath, symbolName string) []string {
 				continue
 			}
 			if !imp.IsFrom && imp.Path == modulePath {
-				// import modulePath  → accessed as modulePath.symbolName
 				seen[path] = struct{}{}
 				continue
 			}
@@ -207,13 +184,10 @@ func (idx *Index) FilesUsing(modulePath, symbolName string) []string {
 	return out
 }
 
-// SameModuleFiles returns other files in the same module path
-// (i.e. the same package directory).
 func (idx *Index) SameModuleFiles(modulePath string) []string {
 	return idx.byModule[modulePath]
 }
 
-// FindDeclaration returns symbols matching name across the project.
 func (idx *Index) FindDeclaration(name string) []*SymbolRef {
 	return idx.bySymbol[name]
 }

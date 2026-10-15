@@ -10,9 +10,6 @@ import (
 	"github.com/serfom256/refactorio/internal/edit"
 )
 
-// stubRename builds an edit set with the given (file, start, end, why)
-// tuples, returning it. Used to drive Find() without depending on the
-// unified.Rename real dispatcher.
 func stubRename(edits []edit.Edit) RenameFn {
 	return func(inFile, name, newName, root string) (*edit.Set, error) {
 		s := edit.NewSet()
@@ -24,16 +21,13 @@ func stubRename(edits []edit.Edit) RenameFn {
 }
 
 func TestFind_OrdersDeclarationFirst(t *testing.T) {
-	// Write a temp file with multi-line content the position helpers can read.
 	tmp := t.TempDir() + "/Foo.cs"
 	src := "namespace Demo;\npublic class Foo {\n    public Foo make() { return new Foo(); }\n}\n"
 	if err := writeFile(t, tmp, src); err != nil {
 		t.Fatal(err)
 	}
 	probe := stubRename([]edit.Edit{
-		// usage first in the edit list — order shouldn't matter.
 		{File: tmp, Start: 75, End: 78, NewText: "Bar", Why: "rename type Foo -> Bar"},
-		// declaration
 		{File: tmp, Start: 29, End: 32, NewText: "Bar", Why: "rename type Foo -> Bar (declaration)"},
 	})
 	res, err := Find(tmp, "Foo", "", probe)
@@ -57,7 +51,6 @@ func TestFind_OverloadsAtBottom(t *testing.T) {
 	if err := writeFile(t, tmp, src); err != nil {
 		t.Fatal(err)
 	}
-	// Two declarations + one usage.
 	probe := stubRename([]edit.Edit{
 		{File: tmp, Start: 19, End: 22, NewText: "Baz", Why: "rename method Foo.Bar -> Baz (declaration)"},
 		{File: tmp, Start: 35, End: 38, NewText: "Baz", Why: "rename method Foo.Bar -> Baz (declaration)"},
@@ -83,7 +76,6 @@ func TestFind_FiltersImportRewrites(t *testing.T) {
 	}
 	probe := stubRename([]edit.Edit{
 		{File: tmp, Start: 21, End: 24, NewText: "Bar", Why: "rename type Foo -> Bar (declaration)"},
-		// These should be filtered out:
 		{File: tmp, Start: 0, End: 5, NewText: "x", Why: "update import for Foo"},
 		{File: tmp, Start: 0, End: 1, NewText: "y", Why: "rename file"},
 		{File: tmp, Start: 0, End: 1, NewText: "z", Why: "rewrite inline FQN for moved class"},
@@ -100,7 +92,6 @@ func TestFind_LineAndColumn(t *testing.T) {
 	if err := writeFile(t, tmp, src); err != nil {
 		t.Fatal(err)
 	}
-	// Hello starts at offset 16 (after `package p\n\nfunc `).
 	probe := stubRename([]edit.Edit{
 		{File: tmp, Start: 16, End: 21, NewText: "Greet", Why: "rename declaration Hello -> Greet"},
 	})

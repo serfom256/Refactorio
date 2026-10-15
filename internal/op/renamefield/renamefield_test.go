@@ -66,9 +66,6 @@ public class Bar {
 }
 
 func TestRenameField_BareReferenceInTargetClass(t *testing.T) {
-	// `count++` is a bare identifier reference (not field_access). We
-	// rewrite it because the identifier is inside the target class body
-	// and there is no local/param shadowing.
 	idx, root := mk(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -92,9 +89,6 @@ public class Bar {
 }
 
 func TestRenameField_ShadowedByLocalIsSkipped(t *testing.T) {
-	// A local var named `count` shadows the field. We conservatively
-	// skip bare-identifier rewrites in the file. The declaration and
-	// any field_access references still apply.
 	idx, root := mk(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -116,26 +110,21 @@ public class Bar {
 		t.Fatal(err)
 	}
 	got := read(t, filepath.Join(root, "src/main/java/com/foo/Bar.java"))
-	// Declaration renamed.
 	if !strings.Contains(got, "int n;") {
 		t.Errorf("declaration not renamed:\n%s", got)
 	}
-	// this.n still present (field_access via this).
 	if !strings.Contains(got, "this.n") {
 		t.Errorf("this.count not renamed:\n%s", got)
 	}
-	// The local `int count = 5;` MUST stay.
 	if !strings.Contains(got, "int count = 5;") {
 		t.Errorf("local shadow was renamed:\n%s", got)
 	}
-	// And `println(count)` (the local) must stay.
 	if !strings.Contains(got, "println(count)") {
 		t.Errorf("local reference was renamed:\n%s", got)
 	}
 }
 
 func TestRenameField_OneOfMultipleInDeclaration(t *testing.T) {
-	// `int a, b, c;` — renaming `b` must only touch `b`.
 	idx, root := mk(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;

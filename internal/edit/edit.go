@@ -1,16 +1,3 @@
-// Package edit collects byte-range edits across one or more files and
-// applies them atomically.
-//
-// An [Edit] is an inclusive-start, exclusive-end byte range plus replacement
-// text. Edits within a single file must not overlap; we sort them in reverse
-// order before applying so earlier-position offsets stay valid as we mutate.
-//
-// Apply is best-effort atomic: it stages every file to a sibling temp file,
-// fsyncs each, then renames. If any rename fails partway through, already
-// renamed files are restored from the originals we read at the start.
-// This is not crash-safe across machine power loss; that would require a
-// journal. It is safe against operation-level failures (parse error,
-// invalid edit, disk-full on one of N files).
 package edit
 
 import (
@@ -22,35 +9,26 @@ import (
 	"strings"
 )
 
-// Edit is a single byte-range replacement within a file.
 type Edit struct {
-	File    string // absolute or working-dir-relative path
-	Start   int    // byte offset, inclusive
-	End     int    // byte offset, exclusive
+	File    string
+	Start   int
+	End     int
 	NewText string
 
-	// Why describes the edit for dry-run output, e.g. "rename fizzBuzz -> FizzBuzz".
 	Why string
 }
 
-// Move is a file rename applied after all edits have committed.
-// Apply uses os.Rename, which is atomic on the same filesystem but
-// not across mountpoints. Directories along To are created as needed.
 type Move struct {
 	From string
 	To   string
 	Why  string
 }
 
-// Delete is a file removal queued after edits and moves.
 type Delete struct {
 	Path string
 	Why  string
 }
 
-// Set is an ordered collection of edits across any number of files,
-// plus optional file moves and deletes. Apply runs edits first, then
-// moves, then deletes.
 type Set struct {
 	edits   []Edit
 	moves   []Move
@@ -61,22 +39,18 @@ func NewSet() *Set { return &Set{} }
 
 func (s *Set) Add(e Edit) { s.edits = append(s.edits, e) }
 
-// AddMove queues a file rename.
 func (s *Set) AddMove(m Move) { s.moves = append(s.moves, m) }
 
-// AddDelete queues a file removal.
 func (s *Set) AddDelete(path, why string) {
 	s.deletes = append(s.deletes, Delete{Path: path, Why: why})
 }
 
-// Moves returns a copy of the queued file moves.
 func (s *Set) Moves() []Move {
 	out := make([]Move, len(s.moves))
 	copy(out, s.moves)
 	return out
 }
 
-// Deletes returns a copy of the queued file deletions.
 func (s *Set) Deletes() []Delete {
 	out := make([]Delete, len(s.deletes))
 	copy(out, s.deletes)
@@ -85,7 +59,6 @@ func (s *Set) Deletes() []Delete {
 
 func (s *Set) Len() int { return len(s.edits) }
 
-// Files returns the distinct files touched by the set, in first-seen order.
 func (s *Set) Files() []string {
 	seen := map[string]struct{}{}
 	var out []string
@@ -99,15 +72,12 @@ func (s *Set) Files() []string {
 	return out
 }
 
-// Edits returns a copy of the underlying edits.
 func (s *Set) Edits() []Edit {
 	out := make([]Edit, len(s.edits))
 	copy(out, s.edits)
 	return out
 }
 
-// Validate checks that no two edits within the same file overlap.
-// Returns the conflicting pair on first overlap.
 func (s *Set) Validate() error {
 	byFile := map[string][]Edit{}
 	for _, e := range s.edits {
@@ -128,9 +98,6 @@ func (s *Set) Validate() error {
 	return nil
 }
 
-// Apply writes every edit. On any failure, files already written are
-// restored from in-memory originals so the on-disk state matches what it
-// was before the call.
 func (s *Set) Apply() error {
 	if err := s.Validate(); err != nil {
 		return err
@@ -153,7 +120,6 @@ func (s *Set) Apply() error {
 		}
 		stages = append(stages, staged{path: f, original: orig, written: out})
 	}
-	// Write each file. On failure, restore everything we already wrote.
 	written := make([]staged, 0, len(stages))
 	for _, st := range stages {
 		if err := writeAtomic(st.path, st.written); err != nil {
@@ -164,11 +130,6 @@ func (s *Set) Apply() error {
 		}
 		written = append(written, st)
 	}
-	// Edits committed; now perform queued file moves. If a move fails
-	// after edits have written, we surface the error but do NOT roll
-	// back the edits — that would require a separate transaction log.
-	// In practice this matters only when target.To straddles a
-	// mountpoint or lacks write permission; both are caller errors.
 	for _, m := range s.moves {
 		if err := os.MkdirAll(filepath.Dir(m.To), 0o755); err != nil {
 			return fmt.Errorf("mkdir for move %s -> %s: %w", m.From, m.To, err)
@@ -185,14 +146,6 @@ func (s *Set) Apply() error {
 	return nil
 }
 
-// DryRun returns a human-readable summary of what Apply would do, without
-// touching the filesystem.
-//
-// The output is deliberately terse, because it is usually read by a tool or
-// an agent rather than scrolled by a human: paths are shown relative to the
-// working directory, each file is named once for its whole group instead of
-// once per edit, and edits sharing a replacement and reason collapse onto a
-// single line listing the line numbers they occur on.
 func (s *Set) DryRun() (string, error) {
 	if err := s.Validate(); err != nil {
 		return "", err
@@ -227,8 +180,6 @@ func (s *Set) DryRun() (string, error) {
 	return string(b), nil
 }
 
-// editGroup is a run of edits within one file that share the same original
-// text, replacement and reason, and so can be reported as one line list.
 type editGroup struct {
 	lines   []int
 	old     string
@@ -236,8 +187,6 @@ type editGroup struct {
 	why     string
 }
 
-// groupEdits collapses edits with an identical (old, new, why) triple into a
-// single group, keeping the order in which each distinct triple first appears.
 func groupEdits(src []byte, es []Edit) []editGroup {
 	starts := lineStarts(src)
 	var out []editGroup
@@ -259,9 +208,6 @@ func groupEdits(src []byte, es []Edit) []editGroup {
 	return out
 }
 
-// lineStarts records the byte offset at which each line begins, so that line
-// numbers can be resolved by binary search rather than by rescanning the file
-// from the top for every edit.
 func lineStarts(src []byte) []int {
 	starts := []int{0}
 	for i, c := range src {
@@ -272,7 +218,6 @@ func lineStarts(src []byte) []int {
 	return starts
 }
 
-// lineAt returns the 1-based number of the line containing off.
 func lineAt(starts []int, off int) int {
 	i := sort.SearchInts(starts, off)
 	if i < len(starts) && starts[i] == off {
@@ -281,8 +226,6 @@ func lineAt(starts []int, off int) int {
 	return i
 }
 
-// formatLines renders a sorted line list, collapsing repeats so that two
-// edits on the same line read as "5(2)" rather than an ambiguous "5,5".
 func formatLines(ns []int) string {
 	var b strings.Builder
 	for i := 0; i < len(ns); {
@@ -304,9 +247,6 @@ func formatLines(ns []int) string {
 	return b.String()
 }
 
-// RelTo shortens p for display when it lies under base. Paths outside base
-// are left alone, so the output is never ambiguous. Reporting commands share
-// this so every path Refactorio prints is relative to the working directory.
 func RelTo(base, p string) string {
 	if base == "" || !filepath.IsAbs(p) {
 		return p
@@ -333,8 +273,6 @@ func (s *Set) groupByFile() map[string][]Edit {
 	return out
 }
 
-// applyToBytes returns src with edits applied. Edits are sorted by Start
-// descending so we can splice in-place without shifting unprocessed offsets.
 func applyToBytes(src []byte, edits []Edit) ([]byte, error) {
 	es := make([]Edit, len(edits))
 	copy(es, edits)
@@ -392,10 +330,6 @@ func safeSlice(src []byte, start, end int) string {
 	return string(src[start:end])
 }
 
-// Metrics summarises how much code a Set changes. LinesChanged is the
-// headline number: how many distinct source lines the refactor rewrote,
-// which is a fairer measure of work done than the raw edit count (a rename
-// often lands several edits on one line).
 type Metrics struct {
 	Files        int
 	Edits        int
@@ -406,12 +340,6 @@ type Metrics struct {
 	LinesDeleted int
 }
 
-// Measure computes the Metrics for this Set.
-//
-// It must be called BEFORE Apply: it reads files as they are on disk now, and
-// Apply rewrites, moves and removes them. Files that cannot be read are
-// skipped rather than reported as an error — metrics are for statistics, and
-// must never be the reason a refactor fails.
 func (s *Set) Measure() Metrics {
 	m := Metrics{
 		Edits:   s.Len(),
@@ -440,8 +368,6 @@ func (s *Set) Measure() Metrics {
 	return m
 }
 
-// countLines returns the number of lines in a file, or 0 if unreadable.
-// A trailing newline does not count as an extra line.
 func countLines(path string) int {
 	src, err := os.ReadFile(path)
 	if err != nil || len(src) == 0 {

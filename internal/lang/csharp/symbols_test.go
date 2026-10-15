@@ -71,7 +71,6 @@ func TestExtract_TopLevelClass(t *testing.T) {
 	if td.Name != "Foo" || td.Kind != "class" || !td.IsPublic {
 		t.Errorf("type: %+v", td)
 	}
-	// 1 field (x), 1 property (Name), 1 method (DoIt), 1 constructor (Foo).
 	if len(td.Fields) != 1 || td.Fields[0].Name != "x" {
 		t.Errorf("fields: %+v", td.Fields)
 	}
@@ -96,7 +95,7 @@ func TestExtract_TopLevelClass(t *testing.T) {
 }
 
 func TestExtract_InternalIsDefault(t *testing.T) {
-	src := []byte(`class Foo { }`) // no `public` → internal
+	src := []byte(`class Foo { }`)
 	fs, _ := ExtractSymbols(src)
 	if len(fs.Types) != 1 || fs.Types[0].IsPublic {
 		t.Errorf("expected non-public Foo: %+v", fs.Types)

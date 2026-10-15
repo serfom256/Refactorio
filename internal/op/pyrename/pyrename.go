@@ -1,4 +1,3 @@
-// Package pyrename implements Python 3 rename, move, and delete operations.
 package pyrename
 
 import (
@@ -32,8 +31,6 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 		return nil, fmt.Errorf("file %s not indexed", req.File)
 	}
 
-	// Find the declaration: top-level declaration in the file, or
-	// a class member.
 	var declRange python.Range
 	var kind string
 	for _, d := range fe.Symbols.Declarations {
@@ -59,18 +56,15 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 
 	set := edit.NewSet()
 
-	// Declaration edit.
 	set.Add(edit.Edit{
 		File: req.File, Start: declRange.Start, End: declRange.End,
 		NewText: req.NewName, Why: fmt.Sprintf("rename declaration %s -> %s", req.Symbol, req.NewName),
 	})
 
-	// Rename in the declaring file, skipping the declaration itself.
 	if err := renameInFile(req.File, req.Symbol, req.NewName, declRange, set); err != nil {
 		return nil, err
 	}
 
-	// For top-level symbols: rename across importing files.
 	if declRange == fe.Symbols.Declarations[topLevelIdx(fe.Symbols, req.Symbol)].NameRange {
 		modPath := req.Index.FileToModulePath(req.File)
 		for _, path := range req.Index.FilesUsing(modPath, req.Symbol) {
@@ -86,15 +80,13 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 	return set, nil
 }
 
-// topLevelIdx returns the index of the top-level declaration with the
-// given name, or -1 if it's a class member (not top-level).
 func topLevelIdx(fs *python.FileSymbols, name string) int {
 	for i, d := range fs.Declarations {
 		if d.Name == name {
 			return i
 		}
 	}
-	return 0 // fallback — caller uses range comparison anyway
+	return 0
 }
 
 type MoveRequest struct {
@@ -119,7 +111,6 @@ func PlanMove(req MoveRequest) (*edit.Set, error) {
 	}
 
 	oldMod := req.Index.FileToModulePath(req.File)
-	// Compute new module path from where the file will land.
 	newRel, _ := filepath.Rel(req.Index.Root, req.NewPath)
 	newRel = filepath.ToSlash(newRel)
 	newRel = strings.TrimSuffix(newRel, ".py")
@@ -128,7 +119,6 @@ func PlanMove(req MoveRequest) (*edit.Set, error) {
 
 	set := edit.NewSet()
 
-	// Update imports in all files that referenced the old module path.
 	if oldMod != newMod && oldMod != "" {
 		for _, path := range req.Index.AllFiles() {
 			if path == req.File {
@@ -177,7 +167,6 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 	set := edit.NewSet()
 	var filesWithRefs []string
 
-	// Remove imports referencing this module.
 	for _, path := range req.Index.AllFiles() {
 		if path == req.File {
 			continue
@@ -211,8 +200,6 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 	return &DeleteResult{Set: set, FilesWithReferences: filesWithRefs}, nil
 }
 
-// renameInFile scans tokens, renaming identifier matches while skipping
-// the declaration itself and tokens inside import statements / strings.
 func renameInFile(path, oldName, newName string, skipRange python.Range, set *edit.Set) error {
 	src, err := os.ReadFile(path)
 	if err != nil {
@@ -242,14 +229,6 @@ func renameInFile(path, oldName, newName string, skipRange python.Range, set *ed
 	return nil
 }
 
-// renameInImportingFile handles a file that imports the symbol from
-// the module we're renaming a symbol IN. We rewrite:
-//
-//	from <module> import <oldName>           → from <module> import <newName>
-//	from <module> import <oldName> as <X>    → from <module> import <newName> as <X>
-//	<module>.<oldName>                       → <module>.<newName>
-//
-// Plus bare references to the local binding (when no alias is used).
 func renameInImportingFile(path, modulePath, oldName, newName string, idx *python.Index, set *edit.Set) error {
 	src, err := os.ReadFile(path)
 	if err != nil {
@@ -261,7 +240,6 @@ func renameInImportingFile(path, modulePath, oldName, newName string, idx *pytho
 		return nil
 	}
 
-	// Rewrite `from X import name [as alias]` clauses.
 	aliased := false
 	for _, imp := range syms.Imports {
 		if imp.IsFrom && imp.Path == modulePath {
@@ -279,12 +257,9 @@ func renameInImportingFile(path, modulePath, oldName, newName string, idx *pytho
 		}
 	}
 	if aliased {
-		// User code uses the alias; no further usage rewrites needed.
 		return nil
 	}
 
-	// Rewrite `module.oldName` chains and bare `oldName` references
-	// (the latter only if a non-aliased `from X import oldName` exists).
 	hasBareImport := false
 	for _, imp := range syms.Imports {
 		if imp.IsFrom && imp.Path == modulePath {
@@ -303,11 +278,8 @@ func renameInImportingFile(path, modulePath, oldName, newName string, idx *pytho
 		if inImportRange(tok, syms) {
 			continue
 		}
-		// Detect `module.oldName` form.
 		prev := prevNonComment(tokens, i-1)
 		if prev != nil && prev.Text == "." {
-			// Heuristic: rename when the receiver is the module's last
-			// segment.
 			receiver := prevNonComment(tokens, indexOf(tokens, prev)-1)
 			if receiver != nil && receiver.Kind == python.TIdent {
 				modParts := strings.Split(modulePath, ".")
@@ -341,9 +313,6 @@ func inImportRange(tok python.Token, syms *python.FileSymbols) bool {
 	return false
 }
 
-// isLocalAssign reports whether the identifier is the target of a
-// local assignment (preceded by indent, followed by `=` but not `==`).
-// We treat any assignment that's not at column 1 as local.
 func isLocalAssign(tokens []python.Token, i int) bool {
 	if i < 0 || i >= len(tokens) {
 		return false
@@ -352,7 +321,6 @@ func isLocalAssign(tokens []python.Token, i int) bool {
 	if tok.Column == 1 {
 		return false
 	}
-	// Walk forward past optional `: type` annotation.
 	j := i + 1
 	if j < len(tokens) && tokens[j].Text == ":" {
 		j++
@@ -374,7 +342,6 @@ func isLocalAssign(tokens []python.Token, i int) bool {
 	if j >= len(tokens) {
 		return false
 	}
-	// `=` followed by something other than `=` is assignment.
 	if tokens[j].Text == "=" {
 		return true
 	}
@@ -401,11 +368,6 @@ func indexOf(tokens []python.Token, t *python.Token) int {
 	return -1
 }
 
-// pyBindings returns the local names an import introduces.
-//
-// `from foo.bar import Baz as B` binds B; `import foo.bar` binds only the
-// top-level package name foo, which is why a surviving `import foo.baz` keeps
-// foo live after `foo.bar` is deleted.
 func pyBindings(imp python.ImportDecl) []string {
 	if imp.IsFrom {
 		names := make([]string, 0, len(imp.Names))
@@ -429,7 +391,6 @@ func pyBindings(imp python.ImportDecl) []string {
 	return []string{path}
 }
 
-// danglingPy reports whether path still uses a name the removed imports bound.
 func danglingPy(path string, bound, stillBound []string, spans []refs.Span) bool {
 	if len(bound) == 0 {
 		return false

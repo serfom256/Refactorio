@@ -95,7 +95,6 @@ public class User { Bar b; }
 	})
 	idx, _ := Build(p, ".java")
 	got := idx.FilesImporting("com.foo.Bar")
-	// Should include: the declaring file + the importing file. NOT Lone.
 	if len(got) != 2 {
 		t.Fatalf("FilesImporting(com.foo.Bar) = %v, want 2", got)
 	}
@@ -123,7 +122,6 @@ public class User { Bar b; }
 }
 
 func TestFilesImporting_SamePackage(t *testing.T) {
-	// A file in the same package as Bar can reference it without an import.
 	p := mkProject(t, map[string]string{
 		"build.gradle":                       "",
 		"src/main/java/com/foo/Bar.java":     "package com.foo; public class Bar {}\n",
@@ -132,7 +130,6 @@ func TestFilesImporting_SamePackage(t *testing.T) {
 	})
 	idx, _ := Build(p, ".java")
 	got := idx.FilesImporting("com.foo.Bar")
-	// Should be Bar.java + Sibling.java (same package). X.java excluded.
 	if len(got) != 2 {
 		t.Fatalf("FilesImporting = %v, want 2", got)
 	}
@@ -144,8 +141,6 @@ func TestFilesImporting_SamePackage(t *testing.T) {
 }
 
 func TestFilesImporting_StaticImports(t *testing.T) {
-	// `import static com.foo.Bar.method` and `import static com.foo.Bar.*`
-	// both mean the file references the Bar TYPE.
 	p := mkProject(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -162,7 +157,6 @@ public class UsesStar { void f() { m(); } }
 	})
 	idx, _ := Build(p, ".java")
 	got := idx.FilesImporting("com.foo.Bar")
-	// Decl + both static importers = 3.
 	if len(got) != 3 {
 		t.Fatalf("FilesImporting = %v, want 3", got)
 	}
@@ -184,7 +178,6 @@ public class User { Bar b; }
 	if len(got) != 2 {
 		t.Fatalf("FilesImporting = %v, want 2", got)
 	}
-	// Confirm both modules contributed.
 	var inApp, inLib bool
 	for _, g := range got {
 		if strings.Contains(g, "/app/") {
@@ -200,14 +193,10 @@ public class User { Bar b; }
 }
 
 func TestBuild_RecordsParseErrors(t *testing.T) {
-	// One malformed file; the index should still build, with that file
-	// reported in Errors() but the lexer is tolerant enough to extract
-	// partial symbols, so it MAY still appear in Files() without error.
-	// What we test here: index never returns an error from Build itself.
 	p := mkProject(t, map[string]string{
 		"build.gradle":              "",
 		"src/main/java/Good.java":   "public class Good {}\n",
-		"src/main/java/Broken.java": "class\n", // syntactically incomplete
+		"src/main/java/Broken.java": "class\n",
 	})
 	idx, err := Build(p, ".java")
 	if err != nil {
@@ -219,9 +208,6 @@ func TestBuild_RecordsParseErrors(t *testing.T) {
 }
 
 func TestErrors_ReturnsOnlyFailures(t *testing.T) {
-	// Force a read error by having SourceFiles enumerate a file that
-	// gets deleted between enumeration and read. Synthesise via a
-	// non-existent symlink to simplify the test.
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "src/main/java"), 0o755); err != nil {
 		t.Fatal(err)
@@ -232,7 +218,6 @@ func TestErrors_ReturnsOnlyFailures(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "src/main/java/Ok.java"), []byte("class Ok {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Dangling symlink looks like a .java file but isn't readable.
 	if err := os.Symlink("/nonexistent/Ghost.java", filepath.Join(root, "src/main/java/Ghost.java")); err != nil {
 		t.Skip("symlink not supported")
 	}

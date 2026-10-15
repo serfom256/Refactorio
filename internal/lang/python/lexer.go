@@ -1,4 +1,3 @@
-// Package python provides Python 3 lexing and symbol extraction.
 package python
 
 import (
@@ -21,9 +20,9 @@ const (
 )
 
 const (
-	TTripleStr    TokenKind = common.TLangSpecific + iota // """...""" or '''...'''
-	TInterpolated                                         // f"..." (with or without {expr})
-	TNewline                                              // logical newline (for indent tracking)
+	TTripleStr TokenKind = common.TLangSpecific + iota
+	TInterpolated
+	TNewline
 )
 
 type Token struct {
@@ -32,7 +31,7 @@ type Token struct {
 	End    int
 	Text   string
 	Line   int
-	Column int // 1-based column of Start within its line
+	Column int
 }
 
 func (t Token) IsKeyword() bool {
@@ -51,7 +50,6 @@ var pyKeywords = map[string]struct{}{
 	"if": {}, "import": {}, "in": {}, "is": {}, "lambda": {},
 	"nonlocal": {}, "not": {}, "or": {}, "pass": {}, "raise": {},
 	"return": {}, "try": {}, "while": {}, "with": {}, "yield": {},
-	// soft / contextual
 	"match": {}, "case": {}, "type": {},
 }
 
@@ -106,9 +104,6 @@ func (l *lexer) columnFor(off int) int {
 	return off - l.lineStart[line-1] + 1
 }
 
-// skipNonNewlineWS skips spaces, tabs, and \r but NOT \n. Newlines
-// are emitted as TNewline so the symbol extractor can use them
-// (combined with column info) for indentation tracking.
 func (l *lexer) skipNonNewlineWS() {
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
@@ -116,7 +111,6 @@ func (l *lexer) skipNonNewlineWS() {
 			l.pos++
 			continue
 		}
-		// Backslash + newline = explicit line continuation; skip both.
 		if c == '\\' && l.pos+1 < len(l.src) && l.src[l.pos+1] == '\n' {
 			l.pos += 2
 			continue
@@ -143,7 +137,6 @@ func (l *lexer) next(prev *[]Token) (Token, bool) {
 	if c == '#' {
 		return l.lineComment(start)
 	}
-	// String prefixes: r, R, b, B, f, F, u, U and combinations rb, br, fb, etc.
 	if isStringPrefix(c) && l.isStringStart(1) {
 		return l.prefixedString(start, prev)
 	}
@@ -151,7 +144,6 @@ func (l *lexer) next(prev *[]Token) (Token, bool) {
 		return l.prefixedString(start, prev)
 	}
 
-	// Triple-quoted strings.
 	if c == '"' && l.peek(1) == '"' && l.peek(2) == '"' {
 		return l.tripleString(start, '"', false, prev)
 	}
@@ -173,8 +165,6 @@ func (l *lexer) next(prev *[]Token) (Token, bool) {
 	return l.operatorOrPunct(start)
 }
 
-// isStringPrefix reports whether the byte is a recognised string
-// literal prefix character (r/R/b/B/f/F/u/U).
 func isStringPrefix(b byte) bool {
 	switch b {
 	case 'r', 'R', 'b', 'B', 'f', 'F', 'u', 'U':
@@ -183,14 +173,11 @@ func isStringPrefix(b byte) bool {
 	return false
 }
 
-// isStringStart reports whether the byte at pos+off is " or '.
 func (l *lexer) isStringStart(off int) bool {
 	c := l.peek(off)
 	return c == '"' || c == '\''
 }
 
-// prefixedString handles r"...", b"...", f"..." and combinations like
-// rb"..." or fr"...". It dispatches to single- or triple-quoted logic.
 func (l *lexer) prefixedString(start int, prev *[]Token) (Token, bool) {
 	prefixStart := l.pos
 	isRaw, isFStr := false, false
@@ -210,7 +197,6 @@ func (l *lexer) prefixedString(start int, prev *[]Token) (Token, bool) {
 	}
 	quote := l.src[l.pos]
 	if quote != '"' && quote != '\'' {
-		// Wasn't actually a string prefix — treat as identifier.
 		l.pos = prefixStart
 		return l.identifier(start)
 	}
@@ -228,9 +214,7 @@ func (l *lexer) lineComment(start int) (Token, bool) {
 }
 
 func (l *lexer) singleString(start int, quote byte, isRaw, isFStr bool, prev *[]Token) (Token, bool) {
-	// Skip the opening quote (after any prefix already consumed).
 	if l.src[l.pos] != quote {
-		// Skip prefix to the quote.
 		for l.pos < len(l.src) && l.src[l.pos] != quote {
 			l.pos++
 		}
@@ -238,7 +222,7 @@ func (l *lexer) singleString(start int, quote byte, isRaw, isFStr bool, prev *[]
 	if l.pos >= len(l.src) {
 		return l.emit(TString, start), true
 	}
-	l.pos++ // opening quote
+	l.pos++
 
 	fragStart := start
 	for l.pos < len(l.src) {
@@ -256,7 +240,6 @@ func (l *lexer) singleString(start int, quote byte, isRaw, isFStr bool, prev *[]
 			return Token{Kind: kind, Start: fragStart, End: l.pos, Text: string(l.src[fragStart:l.pos]), Line: l.lineFor(fragStart), Column: l.columnFor(fragStart)}, true
 		}
 		if c == '\n' {
-			// Unterminated single-line string.
 			kind := TString
 			if isFStr {
 				kind = TInterpolated
@@ -265,7 +248,7 @@ func (l *lexer) singleString(start int, quote byte, isRaw, isFStr bool, prev *[]
 		}
 		if isFStr {
 			if c == '{' && l.peek(1) == '{' {
-				l.pos += 2 // escaped {{
+				l.pos += 2
 				continue
 			}
 			if c == '}' && l.peek(1) == '}' {
@@ -273,7 +256,6 @@ func (l *lexer) singleString(start int, quote byte, isRaw, isFStr bool, prev *[]
 				continue
 			}
 			if c == '{' {
-				// Emit fragment, lex code until matching }.
 				*prev = append(*prev, Token{Kind: TInterpolated, Start: fragStart, End: l.pos, Text: string(l.src[fragStart:l.pos]), Line: l.lineFor(fragStart), Column: l.columnFor(fragStart)})
 				l.pos++
 				depth := 1
@@ -311,14 +293,13 @@ func (l *lexer) singleString(start int, quote byte, isRaw, isFStr bool, prev *[]
 }
 
 func (l *lexer) tripleString(start int, quote byte, isFStr bool, prev *[]Token) (Token, bool) {
-	// Advance to the opening triple if not already there.
 	for l.pos < len(l.src) && l.src[l.pos] != quote {
 		l.pos++
 	}
 	if l.pos+2 >= len(l.src) {
 		return l.emit(TTripleStr, start), true
 	}
-	l.pos += 3 // skip opening triple
+	l.pos += 3
 	for l.pos+2 < len(l.src) {
 		if l.src[l.pos] == quote && l.src[l.pos+1] == quote && l.src[l.pos+2] == quote {
 			l.pos += 3
@@ -332,11 +313,9 @@ func (l *lexer) tripleString(start int, quote byte, isFStr bool, prev *[]Token) 
 			l.pos += 2
 			continue
 		}
-		// Triple-quoted f-strings can contain {expr} — same handling.
 		if isFStr {
 			c := l.src[l.pos]
 			if c == '{' && l.peek(1) != '{' {
-				// Lex inner expression.
 				l.pos++
 				depth := 1
 				for depth > 0 && l.pos < len(l.src) {
@@ -400,7 +379,6 @@ func (l *lexer) number(start int) (Token, bool) {
 	}
 	kind := TInt
 	if l.pos < len(l.src) && l.src[l.pos] == '.' {
-		// Don't consume `..` operator (very rare in Python but be safe).
 		if l.peek(1) != '.' {
 			kind = TFloat
 			l.pos++

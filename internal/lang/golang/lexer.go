@@ -1,4 +1,3 @@
-// Package golang provides Go lexing and symbol extraction.
 package golang
 
 import (
@@ -48,7 +47,6 @@ var goKeywords = map[string]struct{}{
 	"import": {}, "interface": {}, "map": {}, "package": {},
 	"range": {}, "return": {}, "select": {}, "struct": {},
 	"switch": {}, "type": {}, "var": {},
-	// predeclared identifiers — not strictly keywords but useful to flag
 	"true": {}, "false": {}, "nil": {}, "iota": {},
 	"append": {}, "cap": {}, "close": {}, "complex": {}, "copy": {},
 	"delete": {}, "imag": {}, "len": {}, "make": {}, "new": {},
@@ -262,7 +260,7 @@ func (l *lexer) number(start int) (Token, bool) {
 		}
 	}
 	if l.pos < len(l.src) && l.src[l.pos] == 'i' {
-		kind = TFloat // imaginary
+		kind = TFloat
 		l.pos++
 	}
 	return l.emit(kind, start), true
@@ -355,7 +353,6 @@ func isLetter(r rune) bool {
 	return r >= 0x80
 }
 
-// IsValidIdentifier checks Go identifier rules.
 func IsValidIdentifier(s string) bool {
 	if s == "" {
 		return false

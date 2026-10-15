@@ -128,8 +128,6 @@ x = foo.Bar()
 }
 
 func TestRename_AliasedImport(t *testing.T) {
-	// `from X import name as alias` — only the import specifier gets
-	// renamed; the alias and its usages stay.
 	idx, root := mk(t, map[string]string{
 		"foo.py": `class Bar:
     pass
@@ -184,7 +182,6 @@ class Foo:
 }
 
 func TestRename_FStringInterpolation(t *testing.T) {
-	// `name` inside f"{name}" IS a real reference and should be renamed.
 	idx, root := mk(t, map[string]string{
 		"main.py": `name = "world"
 greeting = f"Hello {name}"
@@ -205,7 +202,6 @@ greeting = f"Hello {name}"
 }
 
 func TestRename_SkipsLocalAssignment(t *testing.T) {
-	// `Foo = something` inside a function body is a local assignment.
 	idx, root := mk(t, map[string]string{
 		"main.py": `class Foo:
     pass
@@ -288,8 +284,6 @@ func TestDelete_RemovesFileAndImports(t *testing.T) {
 	}
 }
 
-// A module whose only mention of the deleted module is the import being
-// removed needs no manual cleanup.
 func TestPlanDelete_DeadImportOnlyIsNotReported(t *testing.T) {
 	idx, root := mk(t, map[string]string{
 		"foo.py":  "class Foo:\n    pass\n",
@@ -309,7 +303,6 @@ func TestPlanDelete_DeadImportOnlyIsNotReported(t *testing.T) {
 	}
 }
 
-// `from foo import Foo as F` leaves F dangling, not Foo.
 func TestPlanDelete_TracksAliasedBinding(t *testing.T) {
 	idx, root := mk(t, map[string]string{
 		"foo.py":  "class Foo:\n    pass\n",

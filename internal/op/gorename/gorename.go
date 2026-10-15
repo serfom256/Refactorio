@@ -1,5 +1,3 @@
-// Package gorename implements cross-file Go symbol rename and
-// file move with import-path updates.
 package gorename
 
 import (
@@ -12,10 +10,7 @@ import (
 	"github.com/serfom256/refactorio/internal/lang/golang"
 )
 
-// RenameRequest renames an exported symbol across all files that
-// import its package.
 type RenameRequest struct {
-	// Package is the full import path, e.g. "github.com/foo/bar/pkg".
 	Package string
 	Symbol  string
 	NewName string
@@ -37,21 +32,17 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 
 	set := edit.NewSet()
 
-	// 1. Rename the declaration.
 	set.Add(edit.Edit{
 		File: declFE.Path, Start: decl.NameRange.Start, End: decl.NameRange.End,
 		NewText: req.NewName, Why: fmt.Sprintf("rename declaration %s -> %s", req.Symbol, req.NewName),
 	})
 
-	// 2. Rename all usages in the same package (all files with same
-	//    package declaration share a namespace — no import needed).
 	for _, path := range req.Index.FilesInPackage(req.Package) {
 		if err := renameIdentInFile(path, req.Symbol, req.NewName, decl.NameRange, set); err != nil {
 			return nil, err
 		}
 	}
 
-	// 3. Rename qualified usages in importing files: `pkg.Symbol`.
 	for _, path := range req.Index.FilesImporting(req.Package) {
 		fe := req.Index.File(path)
 		if fe == nil || fe.Symbols == nil {
@@ -62,13 +53,11 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 			continue
 		}
 		if localPkg == "." {
-			// Dot import: bare name in scope.
 			if err := renameIdentInFile(path, req.Symbol, req.NewName, golang.Range{}, set); err != nil {
 				return nil, err
 			}
 			continue
 		}
-		// Regular import: find `pkg.Symbol` pattern.
 		if err := renameQualifiedInFile(path, localPkg, req.Symbol, req.NewName, set); err != nil {
 			return nil, err
 		}
@@ -77,11 +66,9 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 	return set, nil
 }
 
-// MoveRequest moves a Go file and updates import paths in all files
-// that import its package.
 type MoveRequest struct {
-	File    string // absolute path
-	NewPath string // absolute destination
+	File    string
+	NewPath string
 	Index   *golang.Index
 }
 
@@ -111,10 +98,7 @@ func PlanMove(req MoveRequest) (*edit.Set, error) {
 
 	set := edit.NewSet()
 
-	// If the file moves to a different package, update the package
-	// declaration and imports in dependents.
 	if oldPkg != newPkg && fe.Symbols != nil && newPkg != "" {
-		// Update package decl to match new directory.
 		newPkgName := filepath.Base(filepath.Dir(req.NewPath))
 		if fe.Symbols.PackageRange.End > 0 {
 			set.Add(edit.Edit{
@@ -123,7 +107,6 @@ func PlanMove(req MoveRequest) (*edit.Set, error) {
 			})
 		}
 
-		// Update imports in files that imported the old package.
 		for _, path := range req.Index.FilesImporting(oldPkg) {
 			impFE := req.Index.File(path)
 			if impFE == nil || impFE.Symbols == nil {
@@ -139,13 +122,10 @@ func PlanMove(req MoveRequest) (*edit.Set, error) {
 			}
 		}
 
-		// Update relative imports inside the moved file.
 		for _, imp := range fe.Symbols.Imports {
 			if !strings.HasPrefix(imp.Path, req.Index.ModulePath) {
 				continue
 			}
-			// Internal import — path stays the same (it's a module path,
-			// not a relative path). No rewrite needed.
 		}
 	}
 
@@ -182,8 +162,6 @@ func renameIdentInFile(path, oldName, newName string, skipRange golang.Range, se
 		if inImportBlock(tok, tokens) {
 			continue
 		}
-		// Skip local variable declarations: `name :=` or `var name`
-		// or parameter declarations: `name Type` after `(`
 		if isLocalDeclGo(tokens, i) {
 			continue
 		}
@@ -195,14 +173,10 @@ func renameIdentInFile(path, oldName, newName string, skipRange golang.Range, se
 	return nil
 }
 
-// isLocalDeclGo detects if the identifier is a local variable/parameter
-// declaration rather than a reference to the symbol being renamed.
 func isLocalDeclGo(tokens []golang.Token, i int) bool {
-	// `name :=` → short var declaration.
 	if i+1 < len(tokens) && tokens[i+1].Text == ":=" {
 		return true
 	}
-	// `var name` or `const name` → explicit declaration.
 	if i > 0 {
 		prev := prevNonCommentGo(tokens, i-1)
 		if prev != nil && (prev.Text == "var" || prev.Text == "const") {
@@ -228,7 +202,6 @@ func renameQualifiedInFile(path, pkgName, oldName, newName string, set *edit.Set
 		return err
 	}
 	tokens := golang.Tokenize(src)
-	// Find pattern: <pkgName> "." <oldName>
 	for i := 0; i+2 < len(tokens); i++ {
 		if tokens[i].Kind == golang.TIdent && tokens[i].Text == pkgName &&
 			tokens[i+1].Kind == golang.TPunct && tokens[i+1].Text == "." &&
@@ -243,11 +216,8 @@ func renameQualifiedInFile(path, pkgName, oldName, newName string, set *edit.Set
 }
 
 func inImportBlock(tok golang.Token, tokens []golang.Token) bool {
-	// Rough check: find enclosing `import (...)` or `import "..."`.
-	// We look backward for `import` keyword.
 	for i := range tokens {
 		if &tokens[i] == &tok {
-			// Walk backward.
 			for j := i - 1; j >= 0; j-- {
 				if tokens[j].Kind == golang.TIdent && tokens[j].Text == "import" {
 					return true

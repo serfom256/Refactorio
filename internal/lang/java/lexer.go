@@ -6,10 +6,8 @@ import (
 	"github.com/serfom256/refactorio/internal/lang/common"
 )
 
-// TokenKind is an alias for the shared token kind type.
 type TokenKind = common.TokenKind
 
-// Common token kinds re-exported for use as java.TIdent etc.
 const (
 	TIdent   = common.TIdent
 	TPunct   = common.TPunct
@@ -21,14 +19,11 @@ const (
 	TEOF     = common.TEOF
 )
 
-// Java-specific token kinds.
 const (
 	TTextBlock TokenKind = common.TLangSpecific + iota
 	TChar
 )
 
-// Token is one lexical unit. Start/End are byte offsets into the source
-// (End is exclusive). Line is the 1-based line containing Start.
 type Token struct {
 	Kind  TokenKind
 	Start int
@@ -37,10 +32,6 @@ type Token struct {
 	Line  int
 }
 
-// IsKeyword reports whether this identifier token is a Java reserved
-// word. We tokenize keywords as TIdent and let consumers distinguish
-// — that mirrors how we will scan ("did we just pass a `class`
-// keyword?") and keeps the token kind set small.
 func (t Token) IsKeyword() bool {
 	if t.Kind != TIdent {
 		return false
@@ -49,9 +40,6 @@ func (t Token) IsKeyword() bool {
 	return ok
 }
 
-// javaKeywords lists Java reserved words. `record`, `sealed`,
-// `non-sealed`, `permits`, `yield`, `var` are contextual but listed
-// because every parser we write will care about them as control tokens.
 var javaKeywords = map[string]struct{}{
 	"abstract": {}, "assert": {}, "boolean": {}, "break": {}, "byte": {},
 	"case": {}, "catch": {}, "char": {}, "class": {}, "const": {},
@@ -64,15 +52,9 @@ var javaKeywords = map[string]struct{}{
 	"switch": {}, "synchronized": {}, "this": {}, "throw": {}, "throws": {},
 	"transient": {}, "try": {}, "void": {}, "volatile": {}, "while": {},
 	"true": {}, "false": {}, "null": {},
-	// contextual
 	"record": {}, "sealed": {}, "permits": {}, "yield": {}, "var": {},
 }
 
-// Tokenize lexes Java source. Whitespace is dropped; everything else
-// becomes a Token. Lex errors (unterminated string, etc.) are emitted
-// as best-effort tokens covering whatever was scanned so far —
-// downstream tools then see structural breakage but the indexer does
-// not need to fail hard on a single malformed file.
 func Tokenize(src []byte) []Token {
 	l := &lexer{src: src}
 	l.lineStart = []int{0}
@@ -89,7 +71,6 @@ func Tokenize(src []byte) []Token {
 		}
 		t, ok := l.next()
 		if !ok {
-			// Skip the byte and continue — unrecognised input.
 			l.pos++
 			continue
 		}
@@ -105,7 +86,6 @@ type lexer struct {
 }
 
 func (l *lexer) lineFor(off int) int {
-	// Binary search for the largest lineStart[i] <= off; index+1 is line.
 	lo, hi := 0, len(l.lineStart)-1
 	for lo <= hi {
 		mid := (lo + hi) / 2
@@ -150,7 +130,6 @@ func (l *lexer) next() (Token, bool) {
 	case isDigit(c):
 		return l.number(start)
 	case c == '.' && l.pos+1 < len(l.src) && isDigit(l.src[l.pos+1]):
-		// .5, .25e3, etc.
 		return l.number(start)
 	case isIdentStart(rune(c)) || c >= 0x80:
 		return l.identifier(start)
@@ -174,7 +153,7 @@ func (l *lexer) lineComment(start int) (Token, bool) {
 }
 
 func (l *lexer) blockComment(start int) (Token, bool) {
-	l.pos += 2 // skip /*
+	l.pos += 2
 	for l.pos+1 < len(l.src) {
 		if l.src[l.pos] == '*' && l.src[l.pos+1] == '/' {
 			l.pos += 2
@@ -182,12 +161,12 @@ func (l *lexer) blockComment(start int) (Token, bool) {
 		}
 		l.pos++
 	}
-	l.pos = len(l.src) // unterminated; consume rest
+	l.pos = len(l.src)
 	return l.emit(TComment, start), true
 }
 
 func (l *lexer) stringLiteral(start int) (Token, bool) {
-	l.pos++ // opening "
+	l.pos++
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
 		if c == '\\' && l.pos+1 < len(l.src) {
@@ -199,8 +178,6 @@ func (l *lexer) stringLiteral(start int) (Token, bool) {
 			return l.emit(TString, start), true
 		}
 		if c == '\n' {
-			// Unterminated string — close at the line break to keep
-			// downstream scanners on track.
 			return l.emit(TString, start), true
 		}
 		l.pos++
@@ -208,13 +185,8 @@ func (l *lexer) stringLiteral(start int) (Token, bool) {
 	return l.emit(TString, start), true
 }
 
-// textBlock handles Java 15+ `"""..."""`. The opening triple-quote is
-// followed by a line terminator (per spec), but we accept anything and
-// scan until the closing `"""`. Escapes inside text blocks follow the
-// same rules as strings; we only care about positions so we don't
-// interpret them.
 func (l *lexer) textBlock(start int) (Token, bool) {
-	l.pos += 3 // skip """
+	l.pos += 3
 	for l.pos+2 < len(l.src) {
 		if l.src[l.pos] == '\\' && l.pos+1 < len(l.src) {
 			l.pos += 2
@@ -231,7 +203,7 @@ func (l *lexer) textBlock(start int) (Token, bool) {
 }
 
 func (l *lexer) charLiteral(start int) (Token, bool) {
-	l.pos++ // opening '
+	l.pos++
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
 		if c == '\\' && l.pos+1 < len(l.src) {
@@ -251,7 +223,6 @@ func (l *lexer) charLiteral(start int) (Token, bool) {
 }
 
 func (l *lexer) number(start int) (Token, bool) {
-	// Hex/binary/octal prefix.
 	if l.src[l.pos] == '0' && l.pos+1 < len(l.src) {
 		switch l.src[l.pos+1] {
 		case 'x', 'X':
@@ -270,7 +241,6 @@ func (l *lexer) number(start int) (Token, bool) {
 			return l.emit(TInt, start), true
 		}
 	}
-	// Decimal int / float.
 	for l.pos < len(l.src) && (isDigit(l.src[l.pos]) || l.src[l.pos] == '_') {
 		l.pos++
 	}
@@ -292,7 +262,6 @@ func (l *lexer) number(start int) (Token, bool) {
 			l.pos++
 		}
 	}
-	// Float / int suffix.
 	if l.pos < len(l.src) {
 		switch l.src[l.pos] {
 		case 'f', 'F', 'd', 'D':
@@ -312,7 +281,6 @@ func (l *lexer) consumeIntSuffix() {
 }
 
 func (l *lexer) identifier(start int) (Token, bool) {
-	// First rune already validated by the caller.
 	for l.pos < len(l.src) {
 		r, w := utf8.DecodeRune(l.src[l.pos:])
 		if !isIdentContinue(r) {
@@ -323,9 +291,6 @@ func (l *lexer) identifier(start int) (Token, bool) {
 	return l.emit(TIdent, start), true
 }
 
-// operatorOrPunct emits multi-char operators where possible, otherwise
-// single-char punctuation. We greedy-match against the longest
-// known operator prefix.
 func (l *lexer) operatorOrPunct(start int) (Token, bool) {
 	rest := l.src[l.pos:]
 	for _, op := range multiCharOps {
@@ -342,7 +307,6 @@ func (l *lexer) operatorOrPunct(start int) (Token, bool) {
 	return l.emit(TPunct, start), true
 }
 
-// multiCharOps must be ordered longest first.
 var multiCharOps = [][]byte{
 	[]byte(">>>="), []byte("..."), []byte(">>>"), []byte("<<="), []byte(">>="),
 	[]byte("=="), []byte("!="), []byte("<="), []byte(">="), []byte("&&"),
@@ -399,10 +363,6 @@ func isIdentContinue(r rune) bool {
 	return isIdentStart(r) || (r >= '0' && r <= '9')
 }
 
-// isLetter is the JLS §3.8 "Java letter" approximation: ASCII letter
-// or any rune outside ASCII. We do not consult the full Unicode letter
-// tables here; identifiers containing exotic Unicode-category letters
-// will still be accepted because we accept any non-ASCII rune.
 func isLetter(r rune) bool {
 	if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
 		return true

@@ -1,11 +1,3 @@
-// Package typescript provides TS/JS lexing and symbol extraction for
-// the refactoring ops. Covers .ts, .tsx, .js, .jsx, .mts, .cts, .mjs, .cjs.
-//
-// Key difference from the Java lexer: template literals “ `...${expr}...` “
-// are split into string fragments and code tokens. Identifiers inside
-// `${...}` appear as normal TIdent tokens in the stream so rename ops
-// find them. This matches the language semantics — template substitutions
-// are real code references.
 package typescript
 
 import (
@@ -57,7 +49,6 @@ var tsKeywords = map[string]struct{}{
 	"return": {}, "super": {}, "switch": {}, "this": {}, "throw": {},
 	"true": {}, "try": {}, "typeof": {}, "var": {}, "void": {},
 	"while": {}, "with": {}, "yield": {},
-	// TS-specific
 	"abstract": {}, "as": {}, "async": {}, "await": {}, "declare": {},
 	"from": {}, "get": {}, "implements": {}, "interface": {}, "is": {},
 	"keyof": {}, "module": {}, "namespace": {}, "of": {}, "private": {},
@@ -142,7 +133,6 @@ func (l *lexer) next(prevTokens *[]Token) (Token, bool) {
 	case c == '.' && l.pos+1 < len(l.src) && isDigit(l.src[l.pos+1]):
 		return l.number(start)
 	case c == '#' && l.pos+1 < len(l.src):
-		// Private field: #name. Emit # as punct, the ident comes next.
 		l.pos++
 		return l.emit(TPunct, start), true
 	case isIdentStart(rune(c)) || c >= 0x80:
@@ -159,9 +149,6 @@ func (l *lexer) peek(off int) byte {
 	return l.src[l.pos+off]
 }
 
-// isRegexContext uses a heuristic: `/` is a regex start if the previous
-// non-whitespace token is NOT an identifier, number, `)`, `]`, or `}`.
-// This covers the common cases; exotic edge cases may misparse.
 func (l *lexer) isRegexContext(prev *[]Token) bool {
 	if prev == nil || len(*prev) == 0 {
 		return true
@@ -197,7 +184,7 @@ func (l *lexer) blockComment(start int) (Token, bool) {
 }
 
 func (l *lexer) stringLiteral(start int, quote byte) (Token, bool) {
-	l.pos++ // opening quote
+	l.pos++
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
 		if c == '\\' && l.pos+1 < len(l.src) {
@@ -216,15 +203,8 @@ func (l *lexer) stringLiteral(start int, quote byte) (Token, bool) {
 	return l.emit(TString, start), true
 }
 
-// templateLiteral handles “ `text${expr}text` “. It emits:
-//   - TTemplate for each text fragment
-//   - Normal tokens for expressions inside ${...}
-//
-// Returns the first token (the opening template fragment). Subsequent
-// tokens (from ${...} expressions and continuations) are appended
-// directly to prevTokens.
 func (l *lexer) templateLiteral(start int, prevTokens *[]Token) (Token, bool) {
-	l.pos++ // skip opening `
+	l.pos++
 	fragStart := l.pos
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
@@ -233,15 +213,12 @@ func (l *lexer) templateLiteral(start int, prevTokens *[]Token) (Token, bool) {
 			continue
 		}
 		if c == '`' {
-			// End of template.
 			l.pos++
 			return Token{Kind: TTemplate, Start: start, End: l.pos, Text: string(l.src[start:l.pos]), Line: l.lineFor(start)}, true
 		}
 		if c == '$' && l.pos+1 < len(l.src) && l.src[l.pos+1] == '{' {
-			// Emit the text fragment so far as a token.
 			*prevTokens = append(*prevTokens, Token{Kind: TTemplate, Start: start, End: l.pos, Text: string(l.src[start:l.pos]), Line: l.lineFor(start)})
-			l.pos += 2 // skip ${
-			// Lex tokens inside the expression until matching }.
+			l.pos += 2
 			depth := 1
 			for depth > 0 && l.pos < len(l.src) {
 				l.skipWS()
@@ -251,7 +228,7 @@ func (l *lexer) templateLiteral(start int, prevTokens *[]Token) (Token, bool) {
 				if l.src[l.pos] == '}' {
 					depth--
 					if depth == 0 {
-						l.pos++ // consume the closing }
+						l.pos++
 						break
 					}
 				}
@@ -263,7 +240,6 @@ func (l *lexer) templateLiteral(start int, prevTokens *[]Token) (Token, bool) {
 					*prevTokens = append(*prevTokens, inner)
 				}
 			}
-			// Continue scanning the template after }.
 			start = l.pos
 			fragStart = l.pos
 			continue
@@ -275,7 +251,7 @@ func (l *lexer) templateLiteral(start int, prevTokens *[]Token) (Token, bool) {
 }
 
 func (l *lexer) regex(start int) (Token, bool) {
-	l.pos++ // skip opening /
+	l.pos++
 	inCharClass := false
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
@@ -291,7 +267,6 @@ func (l *lexer) regex(start int) (Token, bool) {
 		}
 		if c == '/' && !inCharClass {
 			l.pos++
-			// Consume flags.
 			for l.pos < len(l.src) && isIdentContinue(rune(l.src[l.pos])) {
 				l.pos++
 			}

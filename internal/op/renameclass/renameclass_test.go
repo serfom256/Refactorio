@@ -49,9 +49,6 @@ func read(t *testing.T, p string) string {
 }
 
 func TestRenameClass_RenamesConstructors(t *testing.T) {
-	// Constructor names are `identifier` nodes (not type_identifier).
-	// Leaving them named after the old class turns them into ordinary
-	// methods and the file stops compiling.
 	p, root := mkProject(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -71,11 +68,9 @@ public class Bar {
 		t.Fatal(err)
 	}
 	got := read(t, filepath.Join(root, "src/main/java/com/foo/Baz.java"))
-	// Both constructors must be renamed.
 	if strings.Contains(got, "public Bar(") {
 		t.Errorf("constructor still named Bar:\n%s", got)
 	}
-	// And the regular method must NOT be renamed.
 	if !strings.Contains(got, "public int compute()") {
 		t.Errorf("regular method was disturbed:\n%s", got)
 	}
@@ -95,7 +90,6 @@ public class Bar {
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	// `class Bar`, return type `Bar`, `new Bar` = 3 type_identifier hits.
 	if set.Len() != 3 {
 		t.Errorf("edits = %d, want 3", set.Len())
 	}
@@ -168,7 +162,6 @@ public class User {
 		t.Fatal(err)
 	}
 	user := read(t, filepath.Join(root, "src/main/java/app/User.java"))
-	// The wildcard import stays as-is; only the field type changes.
 	if !strings.Contains(user, "import com.foo.*;") {
 		t.Errorf("wildcard import should stay:\n%s", user)
 	}
@@ -178,8 +171,6 @@ public class User {
 }
 
 func TestRenameClass_ConflictingExplicitImportIsSkipped(t *testing.T) {
-	// User has `import com.other.Bar` which shadows the wildcard.
-	// References to Bar in User.java are com.other.Bar — must NOT rename.
 	p, root := mkProject(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -207,14 +198,12 @@ public class User {
 		t.Fatal(err)
 	}
 	user := read(t, filepath.Join(root, "src/main/java/app/User.java"))
-	// com.other.Bar should be untouched in both the import and the field.
 	if !strings.Contains(user, "import com.other.Bar;") {
 		t.Errorf("com.other.Bar import was modified:\n%s", user)
 	}
 	if !strings.Contains(user, "Bar b;") {
 		t.Errorf("field reference to com.other.Bar was modified:\n%s", user)
 	}
-	// com.foo.Bar renamed in declaration file (and file renamed).
 	fooBar := read(t, filepath.Join(root, "src/main/java/com/foo/Baz.java"))
 	if !strings.Contains(fooBar, "class Baz") {
 		t.Errorf("com.foo.Bar declaration not renamed:\n%s", fooBar)
@@ -326,8 +315,6 @@ public class User { Bar b; }
 }
 
 func TestRenameClass_UnrelatedSameNameUntouched(t *testing.T) {
-	// com.foo.Bar exists; com.other.Bar also exists. Renaming com.foo.Bar
-	// must NOT touch com.other.Bar's declaration.
 	p, root := mkProject(t, map[string]string{
 		"build.gradle":                     "",
 		"src/main/java/com/foo/Bar.java":   "package com.foo; public class Bar {}\n",
@@ -387,7 +374,6 @@ func TestRenameClass_InvalidName(t *testing.T) {
 }
 
 func TestRenameClass_DoesNotMatchSubstring(t *testing.T) {
-	// Renaming Bar must NOT touch BarBaz or PreBar.
 	p, root := mkProject(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;

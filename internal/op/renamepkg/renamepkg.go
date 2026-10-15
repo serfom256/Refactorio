@@ -1,11 +1,9 @@
-// Package renamepkg renames an entire Java package: updates the
-// package declaration in every file, moves files to the new directory,
-// and rewrites imports in all dependent files.
 package renamepkg
 
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/serfom256/refactorio/internal/edit"
@@ -14,8 +12,8 @@ import (
 )
 
 type Request struct {
-	OldPackage string // e.g. "com.foo"
-	NewPackage string // e.g. "com.bar"
+	OldPackage string
+	NewPackage string
 	Index      *index.Index
 }
 
@@ -30,56 +28,54 @@ func Plan(req Request) (*edit.Set, error) {
 		return nil, fmt.Errorf("packages are identical")
 	}
 
-	// Find all types in the old package.
+	filesInPkg := append([]string(nil), req.Index.FilesInPackage(req.OldPackage)...)
+	if len(filesInPkg) == 0 {
+		return nil, fmt.Errorf("no files found in package %q", req.OldPackage)
+	}
+	sort.Strings(filesInPkg)
+
 	var typesInPkg []*index.TypeDecl
-	for _, fe := range req.Index.Files() {
-		if fe.Symbols == nil || fe.Symbols.Package != req.OldPackage {
+	for _, path := range filesInPkg {
+		fe := req.Index.File(path)
+		if fe == nil || fe.Symbols == nil {
 			continue
 		}
 		for i := range fe.Symbols.Types {
-			td := req.Index.LookupFQN(req.OldPackage + "." + fe.Symbols.Types[i].Name)
-			if td != nil {
+			if td := req.Index.LookupFQN(req.OldPackage + "." + fe.Symbols.Types[i].Name); td != nil {
 				typesInPkg = append(typesInPkg, td)
 			}
 		}
 	}
-	if len(typesInPkg) == 0 {
-		return nil, fmt.Errorf("no types found in package %q", req.OldPackage)
-	}
 
 	set := edit.NewSet()
 
-	// 1. For each file in the old package: rewrite package declaration + queue file move.
 	movedFiles := map[string]bool{}
-	for _, td := range typesInPkg {
-		if movedFiles[td.File] {
+	for _, path := range filesInPkg {
+		if movedFiles[path] {
 			continue
 		}
-		movedFiles[td.File] = true
+		movedFiles[path] = true
 
-		fe := req.Index.File(td.File)
+		fe := req.Index.File(path)
 		if fe == nil || fe.Symbols == nil {
 			continue
 		}
-		// Rewrite package declaration.
 		if fe.Symbols.PackageRange.End > 0 {
 			set.Add(edit.Edit{
-				File: td.File, Start: fe.Symbols.PackageRange.Start, End: fe.Symbols.PackageRange.End,
+				File: path, Start: fe.Symbols.PackageRange.Start, End: fe.Symbols.PackageRange.End,
 				NewText: req.NewPackage, Why: fmt.Sprintf("update package %s -> %s", req.OldPackage, req.NewPackage),
 			})
 		}
-		// Queue file move.
-		srcRoot, ok := computeSourceRoot(td.File, req.OldPackage)
+		srcRoot, ok := computeSourceRoot(path, req.OldPackage)
 		if ok {
-			newPath := filepath.Join(srcRoot, packageToPath(req.NewPackage), filepath.Base(td.File))
+			newPath := filepath.Join(srcRoot, packageToPath(req.NewPackage), filepath.Base(path))
 			set.AddMove(edit.Move{
-				From: td.File, To: newPath,
+				From: path, To: newPath,
 				Why: fmt.Sprintf("move to package %s", req.NewPackage),
 			})
 		}
 	}
 
-	// 2. Rewrite imports in all dependent files.
 	dependentFiles := map[string]bool{}
 	for _, td := range typesInPkg {
 		for _, path := range req.Index.FilesImporting(td.FQN) {
@@ -113,22 +109,18 @@ func Plan(req Request) (*edit.Set, error) {
 func rewriteImport(imp java.ImportSpec, oldPkg, newPkg string) (string, bool) {
 	switch {
 	case imp.IsWildcard && !imp.IsStatic:
-		// import com.foo.* → import com.bar.*
 		if imp.Path == oldPkg {
 			return newPkg, true
 		}
 	case imp.IsStatic && imp.IsWildcard:
-		// import static com.foo.Bar.* — Path = "com.foo.Bar"
 		if strings.HasPrefix(imp.Path, oldPkg+".") {
 			return newPkg + imp.Path[len(oldPkg):], true
 		}
 	case imp.IsStatic:
-		// import static com.foo.Bar.member — Path = "com.foo.Bar.member"
 		if strings.HasPrefix(imp.Path, oldPkg+".") {
 			return newPkg + imp.Path[len(oldPkg):], true
 		}
 	default:
-		// import com.foo.Bar
 		if strings.HasPrefix(imp.Path, oldPkg+".") {
 			return newPkg + imp.Path[len(oldPkg):], true
 		}

@@ -8,25 +8,18 @@ import (
 	"time"
 )
 
-// Handler executes a parsed subcommand. Implementations live next to
-// their operation packages and register themselves at process start.
 type Handler func(args *Args, stdout, stderr io.Writer) error
 
-// Command bundles a handler with its help metadata.
 type Command struct {
 	Name    string
 	Handler Handler
-	// Summary is a one-line description shown in the top-level command list.
 	Summary string
-	// Usage is the usage line, e.g. "rename in=<file> name=<sym> to=<new>".
-	Usage string
-	// Help is the full multi-line help body shown for `<cmd> --help`.
-	Help string
+	Usage   string
+	Help    string
 }
 
 var commands = map[string]Command{}
 
-// RegisterCommand binds a Command to its name. Panics on duplicate.
 func RegisterCommand(c Command) {
 	if _, dup := commands[c.Name]; dup {
 		panic(fmt.Sprintf("cli: duplicate command %q", c.Name))
@@ -34,16 +27,10 @@ func RegisterCommand(c Command) {
 	commands[c.Name] = c
 }
 
-// RegisterHandler is the minimal registration (no help). Kept for
-// backwards compatibility with handlers that don't supply help text.
 func RegisterHandler(name string, h Handler) {
 	RegisterCommand(Command{Name: name, Handler: h})
 }
 
-// Dispatch parses argv and invokes the registered handler. Handles
-// `--help` / `-h` / `help` forms before argument parsing.
-//
-// argv must NOT include the program name (caller passes os.Args[1:]).
 func Dispatch(argv []string, stdout, stderr io.Writer) error {
 	if len(argv) == 0 {
 		_, _ = io.WriteString(stdout, Usage())
@@ -52,7 +39,6 @@ func Dispatch(argv []string, stdout, stderr io.Writer) error {
 
 	first := argv[0]
 
-	// `refactorio help [cmd]` or `refactorio --help`
 	if first == "help" || first == "--help" || first == "-h" {
 		if len(argv) > 1 {
 			_, _ = io.WriteString(stdout, commandHelp(argv[1]))
@@ -62,7 +48,6 @@ func Dispatch(argv []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 
-	// `refactorio <cmd> --help`
 	for _, a := range argv[1:] {
 		if a == "--help" || a == "-h" {
 			_, _ = io.WriteString(stdout, commandHelp(first))
@@ -86,17 +71,12 @@ func Dispatch(argv []string, stdout, stderr io.Writer) error {
 	return err
 }
 
-// Observer is notified after each dispatched command completes. It exists so
-// that usage statistics can be recorded from one place without this package
-// depending on the statistics package.
 type Observer func(args *Args, dur time.Duration, err error)
 
 var observer Observer
 
-// SetObserver installs the dispatch observer. Passing nil disables it.
 func SetObserver(o Observer) { observer = o }
 
-// Usage returns the top-level command list with one-line summaries.
 func Usage() string {
 	names := make([]string, 0, len(commands))
 	for n := range commands {
@@ -104,7 +84,6 @@ func Usage() string {
 	}
 	sort.Strings(names)
 
-	// Compute column width for alignment.
 	width := 0
 	for _, n := range names {
 		if len(n) > width {
@@ -124,7 +103,6 @@ func Usage() string {
 	return b.String()
 }
 
-// commandHelp returns the detailed help for one command.
 func commandHelp(name string) string {
 	c, ok := commands[name]
 	if !ok {

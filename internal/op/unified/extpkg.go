@@ -12,21 +12,6 @@ import (
 	"github.com/serfom256/refactorio/internal/project"
 )
 
-// planExternalPackageRename rewrites references to a package that has no
-// sources in the project: javax.* -> jakarta.*, or swapping one dependency's
-// API for another.
-//
-// Nothing is created, moved or deleted — the project does not own the package,
-// so only the references to it change.
-//
-// Matching is on dot boundaries, which is the reason to do this with a lexer
-// rather than a search-and-replace. Rewriting javax.persistence must not touch
-// javax.sql.DataSource, a JDK type that has to stay exactly where it is, nor a
-// hypothetical javax.persistencex. Sub-packages, on the other hand, must move:
-// javax.persistence.criteria.Root becomes jakarta.persistence.criteria.Root,
-// because a migration that silently skipped them would be worse than useless.
-// Strings and comments are never touched, since the lexers tag them apart from
-// identifiers.
 func planExternalPackageRename(from, to string, p *project.Project) (*edit.Set, int, error) {
 	set := edit.NewSet()
 	refs := 0
@@ -56,9 +41,6 @@ func planExternalPackageRename(from, to string, p *project.Project) (*edit.Set, 
 	return set, refs, nil
 }
 
-// inPackage reports whether a dotted path lies inside pkg — the package itself,
-// or any member or sub-package of it. The trailing dot is what makes
-// "javax.persistence" reject "javax.sql.DataSource" and "javax.persistencex".
 func inPackage(path, pkg string) bool {
 	return path == pkg || strings.HasPrefix(path, pkg+".")
 }
@@ -133,10 +115,6 @@ func rewriteKotlinExternal(path, from, to string, set *edit.Set) (int, error) {
 	return n, nil
 }
 
-// prefixEdit replaces the leading `from` of a dotted path with `to`, leaving
-// the rest of the path alone. It verifies the bytes really are `from` first:
-// an import written with whitespace around its dots would otherwise be
-// corrupted by a blind length-based splice.
 func prefixEdit(path string, src []byte, start int, from, to string) (edit.Edit, bool) {
 	end := start + len(from)
 	if start < 0 || end > len(src) || string(src[start:end]) != from {
@@ -148,11 +126,9 @@ func prefixEdit(path string, src []byte, start int, from, to string) (edit.Edit,
 	}, true
 }
 
-// prefixChain is a dotted identifier chain in code whose leading segments spell
-// the package being rewritten.
 type prefixChain struct {
-	start     int // byte offset of the first identifier
-	prefixEnd int // byte offset past the last identifier of the prefix
+	start     int
+	prefixEnd int
 }
 
 func javaChainsWithPrefix(tokens []java.Token, pkg string) []prefixChain {
@@ -179,8 +155,6 @@ func javaChainsWithPrefix(tokens []java.Token, pkg string) []prefixChain {
 			}
 			j += 2
 		}
-		// Require a following dot: the chain must continue into the package,
-		// otherwise this is some unrelated identifier that merely matches.
 		if matched == len(segs) && endTok+1 < len(tokens) &&
 			tokens[endTok+1].Kind == java.TPunct && tokens[endTok+1].Text == "." {
 			out = append(out, prefixChain{start: tokens[i].Start, prefixEnd: tokens[endTok].End})

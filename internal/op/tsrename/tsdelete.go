@@ -10,8 +10,6 @@ import (
 	"github.com/serfom256/refactorio/internal/op/refs"
 )
 
-// DeleteRequest removes a TS/JS file and cleans import statements
-// in all importing files.
 type DeleteRequest struct {
 	File  string
 	Index *typescript.Index
@@ -44,8 +42,6 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 		for _, imp := range impFE.Symbols.Imports {
 			resolved := typescript.ResolveImportPath(imp.Path, path)
 			if resolved != req.File {
-				// A binding from a module we are keeping, so it stays live
-				// even if the deleted module bound the same local name.
 				for _, n := range imp.Names {
 					stillBound = append(stillBound, n.LocalName())
 				}
@@ -69,8 +65,6 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 	return &DeleteResult{Set: set, FilesWithReferences: filesWithRefs}, nil
 }
 
-// danglingTS reports whether path still uses a binding that the removed
-// imports provided.
 func danglingTS(path string, bound, stillBound []string, spans []refs.Span) bool {
 	if len(bound) == 0 {
 		return false

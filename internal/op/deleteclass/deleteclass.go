@@ -1,11 +1,3 @@
-// Package deleteclass removes a Java class file and cleans up import
-// statements in dependent files.
-//
-// Code references to the deleted class (variable types, method calls,
-// etc.) are NOT removed — removing them would require understanding
-// what to replace them with, which is a human decision. The dry-run
-// output lists all files that still reference the class so the user
-// knows where manual cleanup is needed.
 package deleteclass
 
 import (
@@ -24,10 +16,7 @@ type Request struct {
 }
 
 type Result struct {
-	Set *edit.Set
-	// FilesWithReferences lists dependent files that still contain code
-	// references (type usages, method calls) after import removal. The
-	// user should inspect these manually.
+	Set                 *edit.Set
 	FilesWithReferences []string
 }
 
@@ -51,22 +40,17 @@ func Plan(req Request) (*Result, error) {
 		if fe == nil || fe.Symbols == nil {
 			continue
 		}
-		// Removing the import is the cleanup, not evidence that cleanup is
-		// still needed, so its result deliberately does not feed into refs.
 		removeImports(fe, target.FQN, set)
 		if hasCodeReferences(fe, target.Name) {
 			refs = append(refs, path)
 		}
 	}
 
-	// Queue file deletion via a remove (os.Remove happens in Apply).
 	set.AddDelete(target.File, fmt.Sprintf("delete %s", req.FQN))
 
 	return &Result{Set: set, FilesWithReferences: refs}, nil
 }
 
-// removeImports adds edits to remove any import line that names the
-// target class. Returns true if any import was removed.
 func removeImports(fe *index.FileEntry, targetFQN string, set *edit.Set) bool {
 	removed := false
 	for _, imp := range fe.Symbols.Imports {
@@ -78,9 +62,6 @@ func removeImports(fe *index.FileEntry, targetFQN string, set *edit.Set) bool {
 			fqn := strings.TrimSuffix(imp.Path, "."+simpleName(imp.Path))
 			shouldRemove = fqn == targetFQN
 		case imp.IsWildcard:
-			// Wildcard imports cover an entire package, not just this class.
-			// Don't remove them — other classes from the package may still
-			// be used.
 		default:
 			shouldRemove = imp.Path == targetFQN
 		}
@@ -95,13 +76,6 @@ func removeImports(fe *index.FileEntry, targetFQN string, set *edit.Set) bool {
 	return removed
 }
 
-// hasCodeReferences reports whether the file still references className in
-// code once the imports naming it have been removed. A rough check — it is
-// name-based, not type-aware.
-//
-// Identifiers inside import statements are skipped. Those ranges are already
-// queued for deletion, so counting them reported every single file whose
-// import had just been cleaned as still needing manual cleanup.
 func hasCodeReferences(fe *index.FileEntry, className string) bool {
 	src, err := os.ReadFile(fe.Path)
 	if err != nil {
@@ -119,8 +93,6 @@ func hasCodeReferences(fe *index.FileEntry, className string) bool {
 	return false
 }
 
-// withinImport reports whether byte offset off falls inside any import
-// statement in the file.
 func withinImport(imports []java.ImportSpec, off int) bool {
 	for _, imp := range imports {
 		if off >= imp.Range.Start && off < imp.Range.End {

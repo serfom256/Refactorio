@@ -100,8 +100,6 @@ public class User {
 }
 
 func TestRenameMethod_OtherClassSameMethodNameUntouched(t *testing.T) {
-	// Other has a method also named fizzBuzz. Calls on Other-typed
-	// receivers must NOT be renamed.
 	idx, root := mk(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -135,7 +133,6 @@ public class User {
 	if !strings.Contains(user, "o.fizzBuzz()") {
 		t.Errorf("Other call WAS renamed (must NOT be):\n%s", user)
 	}
-	// And Other's declaration must stay as fizzBuzz.
 	other := read(t, filepath.Join(root, "src/main/java/com/foo/Other.java"))
 	if !strings.Contains(other, "public int fizzBuzz()") {
 		t.Errorf("Other.fizzBuzz declaration changed:\n%s", other)
@@ -143,7 +140,6 @@ public class User {
 }
 
 func TestRenameMethod_Overloads(t *testing.T) {
-	// All overloads of the same method name are renamed together.
 	idx, root := mk(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -195,8 +191,6 @@ public class User { int x = Bar.fizzBuzz(); }
 }
 
 func TestRenameMethod_StaticImportMember(t *testing.T) {
-	// `import static com.foo.Bar.fizzBuzz` means bare fizzBuzz() in the
-	// file refers to target.fizzBuzz. The import path is also rewritten.
 	idx, root := mk(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -224,9 +218,6 @@ public class User { int x = fizzBuzz(); }
 }
 
 func TestRenameMethod_UnknownReceiverIsMedium(t *testing.T) {
-	// The receiver `unk` has no declared type in the file, but the file
-	// resolves the target via import. We emit a MEDIUM edit so the user
-	// gets the option in dry-run.
 	idx, root := mk(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -241,7 +232,6 @@ public class User { public void run(Object unk) { /* cast */ ((Bar) unk).fizzBuz
 	if err != nil {
 		t.Fatal(err)
 	}
-	// At least one edit on the User file with MEDIUM tag.
 	var hasMedium bool
 	for _, e := range set.Edits() {
 		if strings.Contains(e.Why, "MEDIUM") && strings.HasSuffix(e.File, "User.java") {
@@ -255,9 +245,6 @@ public class User { public void run(Object unk) { /* cast */ ((Bar) unk).fizzBuz
 }
 
 func TestRenameMethod_BareCallOutsideTargetClassNotTouched(t *testing.T) {
-	// Bare fizzBuzz() inside an unrelated class is NOT a reference to
-	// the target; it could be that class's own method or a free
-	// function (Java has none, but the principle stands).
 	idx, root := mk(t, map[string]string{
 		"build.gradle": "",
 		"src/main/java/com/foo/Bar.java": `package com.foo;
@@ -335,9 +322,6 @@ public class Bar {
 	}
 }
 
-// Method references have neither a '.' nor a '(' after the name, so the call
-// scanner used to skip them all and leave the code pointing at a method that
-// no longer existed.
 func TestRenameMethod_MethodReferences(t *testing.T) {
 	files := map[string]string{
 		"build.gradle": "",
@@ -361,11 +345,9 @@ public class User {
 }
 `,
 	}
-	// Each rename gets a fresh tree: an index holds byte offsets, so reusing
-	// one after applying an edit would plan against stale positions.
 	for _, tc := range []struct {
 		method, newName string
-		want            map[string]string // file -> expected fragment
+		want            map[string]string
 	}{
 		{"build", "compile", map[string]string{
 			"src/main/java/com/foo/Bar.java":  "return this::compile;",
@@ -393,8 +375,6 @@ public class User {
 	}
 }
 
-// A reference through a variable typed as a different class is a different
-// method and must be left alone — the same rule as for ordinary calls.
 func TestRenameMethod_MethodReferenceOnOtherTypeUntouched(t *testing.T) {
 	idx, root := mk(t, map[string]string{
 		"build.gradle": "",

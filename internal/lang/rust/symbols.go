@@ -9,11 +9,8 @@ import (
 type Range = common.Range
 
 type FileSymbols struct {
-	// ModDecls are `mod foo;` declarations that reference child modules.
-	ModDecls []ModDecl
-	// Uses are `use` statements.
-	Uses []UseDecl
-	// Declarations are top-level fn/struct/enum/trait/type/const/static/impl.
+	ModDecls     []ModDecl
+	Uses         []UseDecl
 	Declarations []Declaration
 }
 
@@ -23,19 +20,15 @@ type ModDecl struct {
 }
 
 type UseDecl struct {
-	// Path is the full use path, e.g. "crate::foo::Bar", "std::io::Read".
-	// For grouped uses `use std::{io, fs}`, each group member gets its
-	// own UseDecl with the expanded path.
-	Path  string
-	Alias string // for `use foo::Bar as B`
-	Range Range  // full `use ...;` statement
-	// PathRange covers the path portion inside quotes (for rewriting).
+	Path      string
+	Alias     string
+	Range     Range
 	PathRange Range
 }
 
 type Declaration struct {
 	Name      string
-	Kind      string // "fn" | "struct" | "enum" | "trait" | "type" | "const" | "static" | "impl" | "mod"
+	Kind      string
 	NameRange Range
 	IsPublic  bool
 }
@@ -77,7 +70,6 @@ func (p *rsParser) parse() *FileSymbols {
 		}
 
 		isPublic := false
-		// Skip attributes #[...] and #![...]
 		if p.text() == "#" {
 			p.skip()
 			if p.text() == "!" {
@@ -93,7 +85,6 @@ func (p *rsParser) parse() *FileSymbols {
 			isPublic = true
 			p.skip()
 			p.skipComments()
-			// pub(crate), pub(super), etc.
 			if p.text() == "(" {
 				p.skipParens()
 				p.skipComments()
@@ -144,7 +135,7 @@ func (p *rsParser) parse() *FileSymbols {
 				fs.Declarations = append(fs.Declarations, d)
 			}
 		case "unsafe", "async", "extern":
-			p.skip() // skip modifier, next iteration picks up the keyword
+			p.skip()
 		default:
 			p.skip()
 		}
@@ -153,7 +144,7 @@ func (p *rsParser) parse() *FileSymbols {
 }
 
 func (p *rsParser) parseMod(isPublic bool) (Declaration, bool) {
-	p.skip() // "mod"
+	p.skip()
 	p.skipComments()
 	if p.at().Kind != TIdent {
 		return Declaration{}, false
@@ -167,10 +158,9 @@ func (p *rsParser) parseMod(isPublic bool) (Declaration, bool) {
 	p.skip()
 	p.skipComments()
 	if p.text() == "{" {
-		// Inline module: `mod foo { ... }` — skip the body.
 		p.skipBraces()
 	} else if p.text() == ";" {
-		p.skip() // `mod foo;` — file-based module.
+		p.skip()
 	}
 	return d, true
 }
@@ -178,13 +168,12 @@ func (p *rsParser) parseMod(isPublic bool) (Declaration, bool) {
 func (p *rsParser) parseUse() []UseDecl {
 	stmtStart := p.at().Start
 	stmtLine := p.at().Line
-	p.skip() // "use"
+	p.skip()
 	p.skipComments()
 
 	var uses []UseDecl
 	p.collectUsePaths("", stmtStart, stmtLine, &uses)
 
-	// Skip to ;
 	for p.pos < len(p.tokens) && p.text() != ";" {
 		p.skip()
 	}
@@ -193,23 +182,16 @@ func (p *rsParser) parseUse() []UseDecl {
 		p.skip()
 	}
 
-	// Set Range on all collected uses.
 	for i := range uses {
 		uses[i].Range = Range{Start: stmtStart, End: stmtEnd, Line: stmtLine}
 	}
 	return uses
 }
 
-// collectUsePaths handles simple and grouped use paths recursively.
-//
-//	use foo::Bar;           → "foo::Bar"
-//	use foo::{Bar, Baz};    → "foo::Bar", "foo::Baz"
-//	use foo::Bar as B;      → "foo::Bar" alias "B"
-//	use foo::*;             → "foo::*"
 func (p *rsParser) collectUsePaths(prefix string, stmtStart, stmtLine int, out *[]UseDecl) {
 	p.skipComments()
 	if p.text() == "{" {
-		p.skip() // {
+		p.skip()
 		for p.pos < len(p.tokens) && p.text() != "}" {
 			p.skipComments()
 			if p.text() == "}" {
@@ -227,7 +209,6 @@ func (p *rsParser) collectUsePaths(prefix string, stmtStart, stmtLine int, out *
 		return
 	}
 
-	// Collect path segments: ident :: ident :: ...
 	pathStart := p.at().Start
 	var segments []string
 	for p.pos < len(p.tokens) {
@@ -241,7 +222,6 @@ func (p *rsParser) collectUsePaths(prefix string, stmtStart, stmtLine int, out *
 		if p.text() == "::" {
 			p.skip()
 			p.skipComments()
-			// Check for grouped path: `foo::{Bar, Baz}`
 			if p.text() == "{" {
 				fullPrefix := prefix + strings.Join(segments, "::") + "::"
 				p.collectUsePaths(fullPrefix, stmtStart, stmtLine, out)
@@ -264,7 +244,6 @@ func (p *rsParser) collectUsePaths(prefix string, stmtStart, stmtLine int, out *
 		PathRange: Range{Start: pathStart, End: pathEnd, Line: lineFor(pathStart, p.src)},
 	}
 
-	// Check for `as Alias`.
 	p.skipComments()
 	if p.text() == "as" {
 		p.skip()
@@ -279,9 +258,8 @@ func (p *rsParser) collectUsePaths(prefix string, stmtStart, stmtLine int, out *
 }
 
 func (p *rsParser) parseDecl(kind string, isPublic bool) (Declaration, bool) {
-	p.skip() // keyword
+	p.skip()
 	p.skipComments()
-	// Skip generic params for fn<T>, struct<T>, etc.
 	if p.text() == "<" {
 		p.skipAngleBrackets()
 		p.skipComments()
@@ -302,9 +280,8 @@ func (p *rsParser) parseDecl(kind string, isPublic bool) (Declaration, bool) {
 }
 
 func (p *rsParser) parseImpl() (Declaration, bool) {
-	p.skip() // "impl"
+	p.skip()
 	p.skipComments()
-	// Skip generic params.
 	if p.text() == "<" {
 		p.skipAngleBrackets()
 		p.skipComments()

@@ -13,7 +13,6 @@ type FileSymbols struct {
 	Types        []TypeDecl
 }
 
-// Range is an alias for the shared Range type.
 type Range = common.Range
 
 type ImportSpec struct {
@@ -32,9 +31,7 @@ type TypeDecl struct {
 	Methods   []MemberDecl
 	Fields    []MemberDecl
 	Nested    []TypeDecl
-	// IsPublic is true if the type has the `public` modifier. A
-	// top-level type without it is package-private.
-	IsPublic bool
+	IsPublic  bool
 }
 
 type MemberDecl struct {
@@ -93,22 +90,15 @@ func (p *symParser) parse() *FileSymbols {
 			pendingPublic = false
 			continue
 		}
-		// Track the `public` modifier preceding a top-level type.
 		if tok.Kind == TIdent && tok.Text == "public" {
 			pendingPublic = true
 			p.skip()
 			continue
 		}
-		// Other modifiers don't change visibility; skip without resetting.
 		if tok.Kind == TIdent && isModifier(tok.Text) {
 			p.skip()
 			continue
 		}
-		// Annotations precede/interleave with modifiers; skip without
-		// resetting the pending visibility. `@interface` is the exception: it
-		// declares an annotation type rather than applying an annotation, so
-		// it must fall through to atTypeKeyword below. Treating it as a usage
-		// skipped the declaration and left annotation types unindexed.
 		if tok.Kind == TPunct && tok.Text == "@" && !p.atTypeKeyword() {
 			p.skip()
 			p.skipAnnotation()
@@ -129,7 +119,7 @@ func (p *symParser) parse() *FileSymbols {
 }
 
 func (p *symParser) parsePackage() (string, Range) {
-	p.skip() // "package"
+	p.skip()
 	start := p.pos
 	for p.pos < len(p.tokens) && p.text() != ";" && !p.atTypeKeyword() && p.text() != "import" {
 		p.pos++
@@ -151,7 +141,7 @@ func (p *symParser) parsePackage() (string, Range) {
 
 func (p *symParser) parseImport() (ImportSpec, bool) {
 	importStart := p.at().Start
-	p.skip() // "import"
+	p.skip()
 
 	imp := ImportSpec{}
 	if p.pos < len(p.tokens) && p.text() == "static" {
@@ -171,9 +161,8 @@ func (p *symParser) parseImport() (ImportSpec, bool) {
 			p.skip()
 			continue
 		}
-		// The dot before '*' belongs to the wildcard syntax, not the path.
 		if tok.Text == "." && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Text == "*" {
-			p.skip() // skip the dot
+			p.skip()
 			continue
 		}
 		if pathStart < 0 {
@@ -224,9 +213,8 @@ func (p *symParser) parseType() (TypeDecl, bool) {
 	} else {
 		td.Kind = p.text()
 	}
-	p.skip() // skip keyword (class/interface/enum/record/interface-after-@)
+	p.skip()
 
-	// The name is the next non-keyword TIdent.
 	p.skipComments()
 	for p.pos < len(p.tokens) && (p.at().Kind != TIdent || p.at().IsKeyword()) {
 		p.skip()
@@ -239,7 +227,6 @@ func (p *symParser) parseType() (TypeDecl, bool) {
 	td.NameRange = Range{Start: nameTok.Start, End: nameTok.End, Line: nameTok.Line}
 	p.skip()
 
-	// Skip to opening '{'.
 	for p.pos < len(p.tokens) && p.text() != "{" {
 		p.skip()
 	}
@@ -248,9 +235,7 @@ func (p *symParser) parseType() (TypeDecl, bool) {
 	}
 
 	bodyStart := p.at().Start
-	p.skip() // skip '{'
-	// Enum constants (RED, GREEN, BLUE;) precede regular members.
-	// Skip them to avoid misidentifying them as fields.
+	p.skip()
 	if td.Kind == "enum" {
 		p.skipEnumConstants()
 	}
@@ -263,10 +248,6 @@ func (p *symParser) parseType() (TypeDecl, bool) {
 	return td, true
 }
 
-// parseTypeBody scans inside a type body and fills methods, fields,
-// and nested types. Stops after consuming the matching '}'.
-// Uses a clean brace-depth counter that is NEVER affected by
-// member-scanning lookaheads.
 func (p *symParser) parseTypeBody(td *TypeDecl) {
 	depth := 1
 	for p.pos < len(p.tokens) && depth > 0 {
@@ -287,7 +268,6 @@ func (p *symParser) parseTypeBody(td *TypeDecl) {
 			continue
 		}
 
-		// Nested type declaration: only match at depth==1 (direct child).
 		if depth == 1 && p.atTypeKeyword() {
 			if nested, ok := p.parseType(); ok {
 				td.Nested = append(td.Nested, nested)
@@ -295,11 +275,6 @@ func (p *symParser) parseTypeBody(td *TypeDecl) {
 			continue
 		}
 
-		// At depth 1, try to recognize a member. Always continue after
-		// the attempt — tryParseMembers advances pos by at least 1,
-		// so the next iteration re-checks for {/}/type keywords at the
-		// new position. Without this, restored positions at '{' get
-		// skipped without depth tracking.
 		if depth == 1 && tok.Kind == TIdent {
 			members := p.tryParseMembers(td.Name)
 			for _, m := range members {
@@ -316,15 +291,9 @@ func (p *symParser) parseTypeBody(td *TypeDecl) {
 	}
 }
 
-// tryParseMembers scans forward from the current identifier token,
-// looking for a method/constructor/field declaration. Returns all
-// fields from a multi-declarator statement (e.g. `int a, b, c;`).
-// Advances p.pos past the matched declaration. Returns nil if no
-// recognisable pattern is found (p.pos advanced by 1).
 func (p *symParser) tryParseMembers(className string) []MemberDecl {
 	save := p.pos
 
-	// Skip annotations and modifiers.
 	for p.pos < len(p.tokens) {
 		tok := p.at()
 		if tok.Text == "@" {
@@ -339,8 +308,6 @@ func (p *symParser) tryParseMembers(className string) []MemberDecl {
 		break
 	}
 
-	// Collect non-keyword identifiers while skipping type syntax
-	// (generics, arrays, dots for qualified names, keywords like void/int).
 	var idents []Token
 	for p.pos < len(p.tokens) {
 		tok := p.at()
@@ -353,7 +320,6 @@ func (p *symParser) tryParseMembers(className string) []MemberDecl {
 			p.skip()
 			continue
 		}
-		// Type keywords (void, int, boolean, ...) are part of the type.
 		if tok.Kind == TIdent && isTypeToken(tok.Text) {
 			p.skip()
 			continue
@@ -370,7 +336,6 @@ func (p *symParser) tryParseMembers(className string) []MemberDecl {
 			p.skip()
 			continue
 		}
-		// Hit '(' → method/constructor. The last identifier is the name.
 		if tok.Text == "(" && len(idents) > 0 {
 			name := idents[len(idents)-1]
 			kind := "method"
@@ -378,7 +343,6 @@ func (p *symParser) tryParseMembers(className string) []MemberDecl {
 				kind = "constructor"
 			}
 			p.skipBalanced('(', ')')
-			// Skip throws clause.
 			for p.pos < len(p.tokens) && p.text() == "throws" {
 				p.skip()
 				for p.pos < len(p.tokens) && p.text() != "{" && p.text() != ";" {
@@ -395,11 +359,9 @@ func (p *symParser) tryParseMembers(className string) []MemberDecl {
 				NameRange: Range{Start: name.Start, End: name.End, Line: name.Line},
 			}}
 		}
-		// Hit ';', '=', or ',' → field declaration.
 		if (tok.Text == ";" || tok.Text == "=" || tok.Text == ",") && len(idents) > 0 {
 			return p.parseFieldDeclarators(idents)
 		}
-		// Anything else we don't understand — stop trying.
 		break
 	}
 
@@ -407,12 +369,7 @@ func (p *symParser) tryParseMembers(className string) []MemberDecl {
 	return nil
 }
 
-// parseFieldDeclarators handles `int a, b = 1, c;`. Called when we've
-// collected identifiers and hit `;`, `=`, or `,`. The last identifier
-// before each separator is a field name. We advance past the full `;`.
 func (p *symParser) parseFieldDeclarators(idents []Token) []MemberDecl {
-	// The last ident is the first field name. Preceding idents are
-	// the type (e.g. [Map, String, Integer] for `Map<String,Integer> x`).
 	if len(idents) == 0 {
 		return nil
 	}
@@ -423,7 +380,6 @@ func (p *symParser) parseFieldDeclarators(idents []Token) []MemberDecl {
 		NameRange: Range{Start: name.Start, End: name.End, Line: name.Line},
 	})
 
-	// Now scan through the rest: skip initializers, collect more names.
 	for p.pos < len(p.tokens) {
 		tok := p.at()
 		if tok.Text == ";" {
@@ -437,7 +393,6 @@ func (p *symParser) parseFieldDeclarators(idents []Token) []MemberDecl {
 		}
 		if tok.Text == "," {
 			p.skip()
-			// Next non-comment ident is another field name.
 			p.skipComments()
 			if p.pos < len(p.tokens) && p.at().Kind == TIdent && !p.at().IsKeyword() {
 				n := p.at()
@@ -454,8 +409,6 @@ func (p *symParser) parseFieldDeclarators(idents []Token) []MemberDecl {
 	return fields
 }
 
-// skipFieldInitializer advances past an initializer expression: `= <expr>`.
-// Stops before ',' or ';' at brace/paren depth 0.
 func (p *symParser) skipFieldInitializer() {
 	depth := 0
 	for p.pos < len(p.tokens) {
@@ -474,8 +427,6 @@ func (p *symParser) skipFieldInitializer() {
 	}
 }
 
-// skipEnumConstants advances past enum constant entries until `;`.
-// Handles constants with arguments `RED(1)` and bodies `RED { ... }`.
 func (p *symParser) skipEnumConstants() {
 	depth := 0
 	for p.pos < len(p.tokens) {
@@ -487,7 +438,7 @@ func (p *symParser) skipEnumConstants() {
 		}
 		if tok.Text == "}" {
 			if depth <= 0 {
-				return // hit the outer type's closing brace
+				return
 			}
 			depth--
 			p.skip()

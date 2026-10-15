@@ -103,8 +103,6 @@ console.log(greet("world"));
 }
 
 func TestRename_AliasedImportKeepsAlias(t *testing.T) {
-	// `import { Foo as F }` — renaming Foo to Bar should update
-	// the import to `{ Bar as F }` but NOT rename F in code.
 	idx, root := mk(t, map[string]string{
 		"src/foo.ts": `export class Foo {}`,
 		"src/bar.ts": `import { Foo as F } from './foo';
@@ -264,8 +262,6 @@ func TestMove_SameFile(t *testing.T) {
 	}
 }
 
-// A dependent whose import of the deleted file is removed, and which never
-// used the binding, needs no manual cleanup — it must not be reported.
 func TestPlanDelete_DeadImportOnlyIsNotReported(t *testing.T) {
 	idx, root := mk(t, map[string]string{
 		"src/foo.ts":  "export class Foo {}\n",
@@ -285,7 +281,6 @@ func TestPlanDelete_DeadImportOnlyIsNotReported(t *testing.T) {
 	}
 }
 
-// The name left dangling by `import { Foo as F }` is F, not Foo.
 func TestPlanDelete_TracksAliasedBinding(t *testing.T) {
 	idx, root := mk(t, map[string]string{
 		"src/foo.ts":  "export class Foo {}\n",

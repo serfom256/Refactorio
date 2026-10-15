@@ -1,8 +1,3 @@
-// Package kotlin provides Kotlin lexing and symbol extraction.
-//
-// String templates are split into fragments + code tokens so that
-// `$name` and `${expr}` references appear as normal TIdent in the
-// stream — same approach as the TypeScript lexer for template literals.
 package kotlin
 
 import (
@@ -52,12 +47,10 @@ var ktKeywords = map[string]struct{}{
 	"package": {}, "return": {}, "super": {}, "this": {}, "throw": {},
 	"true": {}, "try": {}, "typealias": {}, "typeof": {}, "val": {},
 	"var": {}, "when": {}, "while": {},
-	// soft keywords
 	"by": {}, "catch": {}, "constructor": {}, "delegate": {},
 	"dynamic": {}, "field": {}, "file": {}, "finally": {}, "get": {},
 	"import": {}, "init": {}, "param": {}, "property": {}, "receiver": {},
 	"set": {}, "setparam": {}, "where": {},
-	// modifier keywords
 	"abstract": {}, "actual": {}, "annotation": {}, "companion": {},
 	"const": {}, "crossinline": {}, "data": {}, "enum": {},
 	"expect": {}, "external": {}, "final": {}, "infix": {}, "inline": {},
@@ -168,7 +161,7 @@ func (l *lexer) lineComment(start int) (Token, bool) {
 
 func (l *lexer) blockComment(start int) (Token, bool) {
 	l.pos += 2
-	depth := 1 // Kotlin supports nested /* */ comments
+	depth := 1
 	for l.pos+1 < len(l.src) && depth > 0 {
 		if l.src[l.pos] == '/' && l.src[l.pos+1] == '*' {
 			depth++
@@ -185,9 +178,8 @@ func (l *lexer) blockComment(start int) (Token, bool) {
 	return l.emit(TComment, start), true
 }
 
-// interpString handles `"..."` with `$name` and `${expr}` interpolation.
 func (l *lexer) interpString(start int, prevTokens *[]Token) (Token, bool) {
-	l.pos++ // skip opening "
+	l.pos++
 	fragStart := start
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
@@ -202,7 +194,6 @@ func (l *lexer) interpString(start int, prevTokens *[]Token) (Token, bool) {
 		if c == '$' && l.pos+1 < len(l.src) {
 			next := l.src[l.pos+1]
 			if next == '{' {
-				// Emit fragment, lex expression.
 				*prevTokens = append(*prevTokens, Token{Kind: TString, Start: fragStart, End: l.pos, Text: string(l.src[fragStart:l.pos]), Line: l.lineFor(fragStart)})
 				l.pos += 2
 				depth := 1
@@ -230,9 +221,8 @@ func (l *lexer) interpString(start int, prevTokens *[]Token) (Token, bool) {
 				continue
 			}
 			if isIdentStart(rune(next)) {
-				// $name — emit fragment, then emit the identifier.
 				*prevTokens = append(*prevTokens, Token{Kind: TString, Start: fragStart, End: l.pos, Text: string(l.src[fragStart:l.pos]), Line: l.lineFor(fragStart)})
-				l.pos++ // skip $
+				l.pos++
 				idStart := l.pos
 				for l.pos < len(l.src) {
 					r, w := utf8.DecodeRune(l.src[l.pos:])
@@ -254,9 +244,8 @@ func (l *lexer) interpString(start int, prevTokens *[]Token) (Token, bool) {
 	return Token{Kind: TString, Start: fragStart, End: l.pos, Text: string(l.src[fragStart:l.pos]), Line: l.lineFor(fragStart)}, true
 }
 
-// rawString handles `"""..."""` with interpolation.
 func (l *lexer) rawString(start int, prevTokens *[]Token) (Token, bool) {
-	l.pos += 3 // skip """
+	l.pos += 3
 	fragStart := start
 	for l.pos+2 < len(l.src) {
 		c := l.src[l.pos]
@@ -335,17 +324,14 @@ func (l *lexer) charLiteral(start int) (Token, bool) {
 	return l.emit(TChar, start), true
 }
 
-// backtickIdent handles “ `keyword` “ identifiers.
 func (l *lexer) backtickIdent(start int) (Token, bool) {
-	l.pos++ // skip `
+	l.pos++
 	for l.pos < len(l.src) && l.src[l.pos] != '`' && l.src[l.pos] != '\n' {
 		l.pos++
 	}
 	if l.pos < len(l.src) && l.src[l.pos] == '`' {
 		l.pos++
 	}
-	// Emit as TIdent — the text includes backticks, but the name
-	// inside is what matters for matching.
 	return l.emit(TIdent, start), true
 }
 

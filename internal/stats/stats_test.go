@@ -9,14 +9,11 @@ import (
 	"github.com/serfom256/refactorio/internal/edit"
 )
 
-// metrics builds the value the edit layer would hand us.
 func metrics(edits, files, lines int) edit.Metrics {
 	return edit.Metrics{Edits: edits, Files: files, LinesChanged: lines}
 }
 
 func TestClassify_NeverLeaksTheRawMessage(t *testing.T) {
-	// The raw text embeds a symbol name and an absolute path; neither may
-	// survive into the recorded kind.
 	err := errors.New(`no class "com.acme.secret.BillingKey" in project /Users/me/work/acme`)
 	kind := classify(err)
 	if kind != "symbol not found" {
@@ -60,7 +57,6 @@ func TestSummarise_DryRunsCountAsUsageButNotAsLines(t *testing.T) {
 	if c.Runs != 3 || c.OK != 2 || c.Err != 1 || c.DryRuns != 1 {
 		t.Errorf("got runs=%d ok=%d err=%d dry=%d, want 3/2/1/1", c.Runs, c.OK, c.Err, c.DryRuns)
 	}
-	// Only the applied, successful run contributes lines.
 	if s.Code.LinesChanged != 40 {
 		t.Errorf("LinesChanged = %d, want 40", s.Code.LinesChanged)
 	}
@@ -148,7 +144,6 @@ func TestRecord_NoOpWhenDisabled(t *testing.T) {
 	t.Setenv("REFACTORIO_NO_STATS", "1")
 	t.Setenv("HOME", t.TempDir())
 	Reset()
-	// Must not panic and must not create the log.
 	Record("rename", []string{"in", "name"}, "/proj", time.Second, nil)
 	if _, err := Load(); err != nil {
 		t.Errorf("Load after disabled Record: %v", err)
@@ -184,5 +179,19 @@ func TestRecordAndLoad_RoundTrip(t *testing.T) {
 	}
 	if strings.Join(ev.Args, ",") != "in,name,to" {
 		t.Errorf("args = %v", ev.Args)
+	}
+}
+
+func TestClassify_CoversTheCommonFailures(t *testing.T) {
+	for _, tc := range []struct{ msg, want string }{
+		{`no files declare package "com.foo", and nothing references it`, "package not found"},
+		{`no types found in package "com.foo"`, "package not found"},
+		{"no project root found (no settings.gradle / pom.xml / build.gradle above this path)", "project not detected"},
+		{"refusing to delete: 2 file(s) still reference it — fix those, or re-run with force=true", "delete blocked by references"},
+		{"file /x/y/Z.java not indexed", "file not indexed"},
+	} {
+		if got := classify(errors.New(tc.msg)); got != tc.want {
+			t.Errorf("classify(%q) = %q, want %q", tc.msg, got, tc.want)
+		}
 	}
 }

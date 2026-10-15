@@ -57,8 +57,6 @@ func Plan(req Request) (*edit.Set, error) {
 		}
 	}
 
-	// Scan ALL project files for inline fully-qualified references
-	// like `com.foo.Bar` used without an import statement.
 	newFQN := strings.TrimSuffix(req.FQN, "."+target.Name) + "." + req.NewName
 	for _, fe := range req.Index.Files() {
 		if fe.Err != nil || fe.Symbols == nil {
@@ -77,7 +75,6 @@ func Plan(req Request) (*edit.Set, error) {
 	}
 	_ = newFQN
 
-	// If the file is named after the old class, rename it to match.
 	oldBase := filepath.Base(target.File)
 	if oldBase == target.Name+".java" {
 		newFile := filepath.Join(filepath.Dir(target.File), req.NewName+".java")
@@ -98,7 +95,6 @@ func planFile(fe *index.FileEntry, target *index.TypeDecl, newName string, set *
 	}
 	tokens := java.Tokenize(src)
 
-	// Declaration file: rename the class declaration + constructors.
 	if fe.Path == target.File {
 		set.Add(edit.Edit{
 			File: fe.Path, Start: target.NameRange.Start, End: target.NameRange.End,
@@ -115,9 +111,6 @@ func planFile(fe *index.FileEntry, target *index.TypeDecl, newName string, set *
 		}
 	}
 
-	// Scan identifier tokens matching the class name with position
-	// awareness. Skip local variable/parameter declarations that
-	// happen to share the class name.
 	for i, tok := range tokens {
 		if tok.Kind != java.TIdent || tok.Text != target.Name {
 			continue
@@ -140,7 +133,6 @@ func planFile(fe *index.FileEntry, target *index.TypeDecl, newName string, set *
 		})
 	}
 
-	// Rewrite imports.
 	for _, imp := range fe.Symbols.Imports {
 		newPath, ok := rewriteImport(imp, target.FQN, target.Package, newName)
 		if !ok {
@@ -166,17 +158,10 @@ func overlapsDecl(tok java.Token, target *index.TypeDecl) bool {
 	return false
 }
 
-// isLocalDeclJava detects if the identifier at index i is a local
-// variable or parameter declaration (e.g. `String Foo = "x"` where
-// Foo is a variable, not a type reference).
 func isLocalDeclJava(tokens []java.Token, i int) bool {
 	if i <= 0 || i+1 >= len(tokens) {
 		return false
 	}
-	// Pattern: <Type> <name> = | ; | , | ) → this is a variable declaration.
-	// The identifier at i is the VARIABLE NAME if:
-	//   - preceded by another identifier (the type)
-	//   - followed by = or ; or , or )
 	prev := prevNonCommentJava(tokens, i-1)
 	next := nextNonCommentJava(tokens, i+1)
 	if prev != nil && prev.Kind == java.TIdent && !isJavaModifier(prev.Text) &&
@@ -215,8 +200,6 @@ func isJavaModifier(s string) bool {
 	return false
 }
 
-// scanAndRenameFQN finds inline fully-qualified references like
-// `com.foo.Bar` in code and renames the last segment.
 func scanAndRenameFQN(path string, tokens []java.Token, targetFQN, newName string, syms *java.FileSymbols, set *edit.Set) {
 	i := 0
 	for i < len(tokens) {
@@ -226,7 +209,6 @@ func scanAndRenameFQN(path string, tokens []java.Token, targetFQN, newName strin
 		}
 		chain, endIdx := buildDottedChain(tokens, i)
 		if chain == targetFQN && endIdx > i {
-			// Skip if this chain is inside an import or package declaration.
 			if inImportRange(tokens[i], syms) || inPackageRange(tokens[i], syms) {
 				i = endIdx
 				continue

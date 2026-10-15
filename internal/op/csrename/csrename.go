@@ -1,4 +1,3 @@
-// Package csrename implements C# rename/move/delete operations.
 package csrename
 
 import (
@@ -32,7 +31,6 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 	}
 	ns := fe.Symbols.Namespace
 
-	// Find the declaration: top-level type, or member of a top-level type.
 	var declRange csharp.Range
 	var symbolKind string
 	for _, td := range fe.Symbols.Types {
@@ -78,19 +76,15 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 
 	set := edit.NewSet()
 
-	// Declaration edit.
 	set.Add(edit.Edit{
 		File: req.File, Start: declRange.Start, End: declRange.End,
 		NewText: req.NewName, Why: fmt.Sprintf("rename declaration %s -> %s", req.Symbol, req.NewName),
 	})
 
-	// Rename within the declaring file (skipping declaration itself).
 	if err := renameInFile(req.File, req.Symbol, req.NewName, declRange, set); err != nil {
 		return nil, err
 	}
 
-	// For top-level type renames: also rename in files that USE it
-	// (via using directive or same namespace).
 	if symbolKind == "type" {
 		fqn := req.Symbol
 		if ns != "" {
@@ -110,7 +104,6 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 			}
 		}
 
-		// Rename the file if it matches the type name.
 		base := filepath.Base(req.File)
 		if base == req.Symbol+".cs" {
 			newFile := filepath.Join(filepath.Dir(req.File), req.NewName+".cs")
@@ -144,18 +137,15 @@ func PlanMove(req MoveRequest) (*edit.Set, error) {
 
 	set := edit.NewSet()
 
-	// Compute new namespace from destination path relative to the source root.
 	newNS := namespaceFromPath(req.NewPath, req.Index.Root)
 	oldNS := fe.Symbols.Namespace
 
-	// Rewrite namespace declaration if it changes.
 	if newNS != "" && newNS != oldNS && fe.Symbols.NamespaceRange.End > 0 {
 		set.Add(edit.Edit{
 			File: req.File, Start: fe.Symbols.NamespaceRange.Start, End: fe.Symbols.NamespaceRange.End,
 			NewText: newNS, Why: fmt.Sprintf("update namespace to %s", newNS),
 		})
 
-		// Update using directives in files that imported the old namespace.
 		for _, path := range req.Index.FilesUsing(oldNS) {
 			if path == req.File {
 				continue
@@ -265,7 +255,6 @@ func isLocalDeclCS(tokens []csharp.Token, i int) bool {
 	if prev == nil {
 		return false
 	}
-	// `var name`, `int name`, `string name` — local declarations
 	if prev.Kind == csharp.TIdent && (prev.Text == "var" || isPrimitiveType(prev.Text)) {
 		next := nextNonComment(tokens, i+1)
 		if next != nil && (next.Text == "=" || next.Text == ";" || next.Text == "," || next.Text == ")") {
@@ -317,10 +306,6 @@ func fileHasIdentifier(path, name string) bool {
 	return false
 }
 
-// namespaceFromPath computes a namespace from a file path relative
-// to the project root. Each directory becomes a namespace segment.
-// e.g. <root>/src/Foo/Bar/Baz.cs → "src.Foo.Bar" (relative dir, dot-joined).
-// Returns "" when the file is at the root.
 func namespaceFromPath(file, root string) string {
 	dir := filepath.Dir(file)
 	rel, err := filepath.Rel(root, dir)

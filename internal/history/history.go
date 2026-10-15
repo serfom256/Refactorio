@@ -1,14 +1,3 @@
-// Package history provides per-project undo support by snapshotting
-// file contents before each refactoring operation.
-//
-// Layout:
-//
-//	~/.refactorio/projects/<hash>/history/0001.gob   ... 0010.gob
-//	~/.refactorio/projects/<hash>/path.txt           absolute project root, for display
-//
-// <hash> is the first 12 hex chars of SHA-256 of the absolute project
-// root path. Each project's stack holds at most MaxEntries entries;
-// oldest are pruned on save.
 package history
 
 import (
@@ -28,7 +17,6 @@ import (
 
 const MaxEntries = 10
 
-// Changeset is the undo record for one refactoring operation.
 type Changeset struct {
 	ID          int
 	Timestamp   time.Time
@@ -44,10 +32,6 @@ type DeletedFile struct {
 	Content []byte
 }
 
-// FindProjectRoot walks up from start looking for a project marker
-// (go.mod, Cargo.toml, gradle/maven files, package.json). Returns the
-// nearest ancestor with such a marker, or start (as an absolute path)
-// if none is found.
 func FindProjectRoot(start string) string {
 	abs, err := filepath.Abs(start)
 	if err != nil {
@@ -79,8 +63,6 @@ func FindProjectRoot(start string) string {
 	}
 }
 
-// projectDir returns ~/.refactorio/projects/<hash>/, creating the
-// directory and recording the path marker file on first use.
 func projectDir(projectRoot string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -92,7 +74,6 @@ func projectDir(projectRoot string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	// Write the path marker (overwrite-safe).
 	pathFile := filepath.Join(filepath.Dir(dir), "path.txt")
 	if _, err := os.Stat(pathFile); err != nil {
 		_ = os.WriteFile(pathFile, []byte(projectRoot+"\n"), 0o644)
@@ -100,9 +81,6 @@ func projectDir(projectRoot string) (string, error) {
 	return dir, nil
 }
 
-// Snapshot captures original contents of files affected by the edit
-// set. projectRoot is recorded for display and used to scope storage.
-// Call BEFORE set.Apply().
 func Snapshot(set *edit.Set, command, projectRoot string) (*Changeset, error) {
 	cs := &Changeset{
 		Timestamp:   time.Now(),
@@ -133,8 +111,6 @@ func Snapshot(set *edit.Set, command, projectRoot string) (*Changeset, error) {
 	return cs, nil
 }
 
-// Save writes a changeset under the project's history directory and
-// prunes entries beyond MaxEntries.
 func Save(cs *Changeset) error {
 	dir, err := projectDir(cs.ProjectRoot)
 	if err != nil {
@@ -166,7 +142,6 @@ func Save(cs *Changeset) error {
 	return nil
 }
 
-// Rollback restores the most recent changeset for the given project.
 func Rollback(projectRoot string) (string, error) {
 	dir, err := projectDir(projectRoot)
 	if err != nil {
@@ -222,8 +197,6 @@ func Rollback(projectRoot string) (string, error) {
 	return desc, nil
 }
 
-// List returns descriptions of changesets stored for the given project
-// (newest last). Also returns the project root for header display.
 func List(projectRoot string) ([]string, error) {
 	dir, err := projectDir(projectRoot)
 	if err != nil {

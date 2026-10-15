@@ -17,14 +17,14 @@ type Range = common.Range
 
 type ImportSpec struct {
 	Path      string
-	Alias     string // for `import com.foo.Bar as B`
+	Alias     string
 	Range     Range
 	PathRange Range
 }
 
 type Declaration struct {
 	Name      string
-	Kind      string // "class" | "interface" | "object" | "enum" | "fun" | "val" | "var" | "typealias"
+	Kind      string
 	NameRange Range
 	IsExport  bool
 }
@@ -77,8 +77,7 @@ func (p *ktParser) parse() *FileSymbols {
 			continue
 		}
 
-		isExport := true // Kotlin: everything is public by default
-		// Skip modifiers
+		isExport := true
 		for p.at().Kind == TIdent && isModifier(p.text()) {
 			if p.text() == "private" || p.text() == "internal" {
 				isExport = false
@@ -104,7 +103,7 @@ func (p *ktParser) parse() *FileSymbols {
 }
 
 func (p *ktParser) parsePackage() (string, Range) {
-	p.skip() // "package"
+	p.skip()
 	p.skipComments()
 	start := p.pos
 	for p.pos < len(p.tokens) && p.text() != ";" && !isDeclKeyword(p.text()) && p.text() != "import" {
@@ -124,7 +123,7 @@ func (p *ktParser) parsePackage() (string, Range) {
 
 func (p *ktParser) parseImport() (ImportSpec, bool) {
 	imp := ImportSpec{Range: Range{Start: p.at().Start, Line: p.at().Line}}
-	p.skip() // "import"
+	p.skip()
 	p.skipComments()
 
 	pathStart, pathEnd := -1, -1
@@ -144,7 +143,6 @@ func (p *ktParser) parseImport() (ImportSpec, bool) {
 			break
 		}
 		if tok.Text == "*" {
-			// Kotlin wildcard: import com.foo.*
 			path.WriteString("*")
 			p.skip()
 			continue
@@ -183,7 +181,6 @@ func (p *ktParser) parseDeclaration(isExport bool) (Declaration, bool) {
 		d.Kind = tok.Text
 		p.skip()
 		p.skipComments()
-		// `enum class` → kind stays "enum"
 		if d.Kind == "enum" && p.text() == "class" {
 			p.skip()
 			p.skipComments()
@@ -200,20 +197,16 @@ func (p *ktParser) parseDeclaration(isExport bool) (Declaration, bool) {
 		d.Kind = "fun"
 		p.skip()
 		p.skipComments()
-		// Skip generic params <T>
 		if p.text() == "<" {
 			p.skipAngleBrackets()
 			p.skipComments()
 		}
-		// Extension function: Type.name — skip the receiver type.
-		// Look ahead: if we see Ident.Ident(, the first is the receiver.
 		if p.at().Kind == TIdent {
 			name := p.text()
 			nameRange := Range{Start: p.at().Start, End: p.at().End, Line: p.at().Line}
 			p.skip()
 			p.skipComments()
 			if p.text() == "." {
-				// Extension function — skip receiver, get actual name.
 				p.skip()
 				p.skipComments()
 				if p.at().Kind == TIdent {

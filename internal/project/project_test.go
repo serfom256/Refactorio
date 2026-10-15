@@ -9,9 +9,6 @@ import (
 	"testing"
 )
 
-// writeTree creates a tree of files under root.
-// Keys are paths relative to root; values are file contents (empty
-// string creates a directory only when path ends with "/").
 func writeTree(t *testing.T, root string, files map[string]string) {
 	t.Helper()
 	for rel, content := range files {
@@ -124,8 +121,6 @@ func TestDetect_MultiModuleGradleKotlin(t *testing.T) {
 }
 
 func TestDetect_GradleIncludeMissingOnDisk(t *testing.T) {
-	// settings.gradle lists an include that does not exist on disk —
-	// we skip it silently rather than failing detection.
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
 		"settings.gradle":          "include ':app', ':ghost'",
@@ -173,10 +168,6 @@ func TestDetect_MultiModuleMaven(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DetectFrom: %v", err)
 	}
-	// The first pom we hit walking up is app/pom.xml. That's currently
-	// our behavior — we treat that as the root. Document the limit:
-	// users must invoke from the actual root for proper multi-module
-	// detection. Verify the more useful invocation:
 	p2, err := DetectFrom(root)
 	if err != nil {
 		t.Fatalf("DetectFrom(root): %v", err)
@@ -189,7 +180,6 @@ func TestDetect_MultiModuleMaven(t *testing.T) {
 	if !reflect.DeepEqual(got, []string{"", "app", "lib"}) {
 		t.Errorf("modules = %v", got)
 	}
-	// And the from-subdir result has the smaller tree:
 	if len(p.Modules) == 0 {
 		t.Errorf("DetectFrom subdir: expected at least one module")
 	}

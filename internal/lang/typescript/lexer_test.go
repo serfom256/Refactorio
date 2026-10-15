@@ -48,7 +48,6 @@ func TestTokenize_TemplateLiteral_NoSubstitution(t *testing.T) {
 func TestTokenize_TemplateLiteral_WithSubstitution(t *testing.T) {
 	src := "const name = 'x'; const s = `Hello ${name} bye`;"
 	tokens := Tokenize([]byte(src))
-	// `name` appears twice as TIdent: declaration + inside ${...}.
 	nameCount := 0
 	for _, tok := range tokens {
 		if tok.Kind == TIdent && tok.Text == "name" {
@@ -63,7 +62,6 @@ func TestTokenize_TemplateLiteral_WithSubstitution(t *testing.T) {
 func TestTokenize_TemplateLiteral_NestedBraces(t *testing.T) {
 	src := "const s = `${obj.x > 0 ? {a: 1} : {b: 2}}`;"
 	tokens := Tokenize([]byte(src))
-	// Should not crash or misparse. obj and x should appear as idents.
 	var found bool
 	for _, tok := range tokens {
 		if tok.Kind == TIdent && tok.Text == "obj" {

@@ -20,8 +20,6 @@ func usagesFind(t *testing.T, file, name, root string) (*usages.Result, error) {
 func usagesFormatText(w io.Writer, r *usages.Result) error { return usages.FormatText(w, r) }
 func usagesFormatJSON(w io.Writer, r *usages.Result) error { return usages.FormatJSON(w, r) }
 
-// runDelete drives the delete command the way the CLI does, so the tests cover
-// the refusal gate and not just the planning layer.
 func runDelete(t *testing.T, out io.Writer, argv ...string) error {
 	t.Helper()
 	args, err := cli.Parse(append([]string{"delete"}, argv...))
@@ -52,8 +50,6 @@ func read(t *testing.T, p string) string {
 	}
 	return string(b)
 }
-
-// --- Java ---
 
 func TestUnifiedRename_Java(t *testing.T) {
 	root := t.TempDir()
@@ -112,8 +108,6 @@ public class User { Bar b; }
 	}
 }
 
-// Same-package files that use a class without an import must get an
-// explicit import added when the class is moved out of the package.
 func TestUnifiedMove_Java_SamePackageGetsImport(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -140,25 +134,20 @@ public class Unrelated { int x; }
 	if err := set.Apply(); err != nil {
 		t.Fatal(err)
 	}
-	// B.java uses A — should now have an import.
 	b := read(t, filepath.Join(root, "src/main/java/com/test/B.java"))
 	if !strings.Contains(b, "import com.other.A;") {
 		t.Errorf("B.java missing import for moved A:\n%s", b)
 	}
-	// C.java uses A — should now have an import.
 	c := read(t, filepath.Join(root, "src/main/java/com/test/C.java"))
 	if !strings.Contains(c, "import com.other.A;") {
 		t.Errorf("C.java missing import for moved A:\n%s", c)
 	}
-	// Unrelated.java does NOT use A — should NOT get an import.
 	u := read(t, filepath.Join(root, "src/main/java/com/test/Unrelated.java"))
 	if strings.Contains(u, "import") {
 		t.Errorf("Unrelated.java should not have an import:\n%s", u)
 	}
 }
 
-// Moving a class that uses a package-private sibling must warn that
-// the sibling won't be importable from the new package.
 func TestUnifiedMove_Java_PackagePrivateWarning(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -168,7 +157,6 @@ public class A {
     Helper h = new Helper();
 }
 `,
-		// Helper is package-private (no `public`).
 		"src/main/java/com/test/Helper.java": `package com.test;
 class Helper {}
 `,
@@ -190,7 +178,6 @@ class Helper {}
 	}
 }
 
-// Moving a class that only uses PUBLIC siblings produces no warning.
 func TestUnifiedMove_Java_NoWarningForPublic(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -236,8 +223,6 @@ func TestUnifiedDelete_Java(t *testing.T) {
 		t.Errorf("import not removed:\n%s", user)
 	}
 }
-
-// --- TypeScript ---
 
 func TestUnifiedRename_TS(t *testing.T) {
 	root := t.TempDir()
@@ -298,8 +283,6 @@ func TestUnifiedDelete_TS(t *testing.T) {
 		t.Errorf("file still exists")
 	}
 }
-
-// --- Go ---
 
 func TestUnifiedRename_Go(t *testing.T) {
 	root := t.TempDir()
@@ -364,8 +347,6 @@ func TestUnifiedDelete_Go(t *testing.T) {
 	}
 }
 
-// --- Kotlin ---
-
 func TestUnifiedRename_Kotlin(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -387,8 +368,6 @@ func TestUnifiedRename_Kotlin(t *testing.T) {
 	}
 }
 
-// Regression test: renaming a class must not modify same-package files
-// that happen to use the same identifier for a different purpose.
 func TestUnifiedRename_Java_DoesNotTouchSamePackageCollision(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -413,17 +392,12 @@ public class Other {
 	if err := set.Apply(); err != nil {
 		t.Fatal(err)
 	}
-	// Other.java: the local variable `Foo` must NOT be renamed — it's
-	// a string variable, not a reference to the class.
 	other := read(t, filepath.Join(root, "src/main/java/com/foo/Other.java"))
 	if strings.Contains(other, `String Bar = "local`) {
 		t.Errorf("local variable was wrongly renamed:\n%s", other)
 	}
 }
 
-// Renaming a symbol that doesn't exist as a declaration should error.
-// Regression: inline fully-qualified references like
-// `com.foo.Field x = new com.foo.Field()` must be renamed too.
 func TestUnifiedRename_Java_InlineFQN(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -500,7 +474,6 @@ public class Utils { public static Class wrap(Object o) { return o.getClass(); }
 	}
 }
 
-// Verify that files with explicit imports DO get renamed.
 func TestUnifiedRename_Java_ExplicitImportStillWorks(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -530,7 +503,6 @@ public class User { Bar b; }
 	}
 }
 
-// End-to-end usages: rename probe → real findings across languages.
 func TestUsages_Java(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -570,7 +542,6 @@ func TestUsages_FormatTextAndJSON(t *testing.T) {
 	if result.Total == 0 {
 		t.Fatal("expected non-zero findings")
 	}
-	// Text format
 	var textBuf bytes.Buffer
 	if err := usagesFormatText(&textBuf, result); err != nil {
 		t.Fatal(err)
@@ -578,7 +549,6 @@ func TestUsages_FormatTextAndJSON(t *testing.T) {
 	if !strings.Contains(textBuf.String(), "(declaration)") {
 		t.Errorf("text format missing declaration tag:\n%s", textBuf.String())
 	}
-	// JSON format round-trip
 	var jsonBuf bytes.Buffer
 	if err := usagesFormatJSON(&jsonBuf, result); err != nil {
 		t.Fatal(err)
@@ -595,11 +565,6 @@ func TestUnifiedRename_UnsupportedExtension(t *testing.T) {
 	}
 }
 
-// The two ways the delete warning used to be wrong, on one tree:
-//
-//	SamePackageUser  uses Doomed with no import   — was never examined
-//	RealUser         imports and uses Doomed      — correctly reported
-//	ImportOnly       imports but never uses it    — was wrongly reported
 func TestDelete_SurvivingRefsAreAccurate(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -639,8 +604,6 @@ public class ImportOnly { int n = 1; }
 	}
 }
 
-// A same-package user needs no import, so it was invisible to the old
-// import-driven check and delete broke the build with no warning at all.
 func TestDelete_SamePackageUserIsReported(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -661,7 +624,6 @@ public class SamePackageUser { public String go() { return new Doomed().hello();
 	}
 }
 
-// A dependent whose import is merely cleaned needs no manual work.
 func TestDelete_ImportOnlyDependentIsNotReported(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -683,7 +645,6 @@ public class ImportOnly { int n = 1; }
 	}
 }
 
-// Delete must refuse to run when references survive, and say which files.
 func TestHandleDelete_RefusesWhenReferencesSurvive(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -712,7 +673,6 @@ public class SamePackageUser { public String go() { return new Doomed().hello();
 		t.Error("file was deleted despite the refusal")
 	}
 
-	// force=true goes through.
 	out.Reset()
 	if err := runDelete(t, &out, "in="+target, "root="+root, "force=true"); err != nil {
 		t.Fatalf("force=true should succeed: %v", err)
@@ -730,7 +690,6 @@ func TestInPackage_DotBoundary(t *testing.T) {
 		{"javax.persistence", "javax.persistence", true},
 		{"javax.persistence.Entity", "javax.persistence", true},
 		{"javax.persistence.criteria.Root", "javax.persistence", true},
-		// The cases a naive search-and-replace gets wrong:
 		{"javax.sql.DataSource", "javax.persistence", false},
 		{"javax.persistencex.Foo", "javax.persistence", false},
 		{"javax.persistenceX", "javax.persistence", false},
@@ -743,8 +702,6 @@ func TestInPackage_DotBoundary(t *testing.T) {
 	}
 }
 
-// The javax -> jakarta migration, including the JDK packages that share the
-// javax prefix and must not move.
 func TestRenamePackage_ExternalRewritesReferencesOnly(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -792,7 +749,6 @@ public class Order {
 			t.Errorf("missing rewrite %q in:\n%s", want, got)
 		}
 	}
-	// JDK packages sharing the javax prefix must be untouched.
 	for _, keep := range []string{
 		"import javax.sql.DataSource;",
 		"private javax.sql.rowset.CachedRowSet crs;",
@@ -815,12 +771,13 @@ func TestRenamePackage_ExternalErrorsWhenNoReferences(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error when the package is neither owned nor referenced")
 	}
-	if !strings.Contains(err.Error(), "no references") {
-		t.Errorf("error should explain both cases, got: %v", err)
+	for _, want := range []string{"no files declare", "nothing references it", "doctor"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
 	}
 }
 
-// A package the project DOES own must still be moved, not merely rewritten.
 func TestRenamePackage_OwnedPackageStillMovesFiles(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
@@ -837,8 +794,6 @@ func TestRenamePackage_OwnedPackageStillMovesFiles(t *testing.T) {
 	}
 }
 
-// A package containing only annotation types used to fail with
-// "no types found in package".
 func TestRenamePackage_AnnotationOnlyPackage(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{

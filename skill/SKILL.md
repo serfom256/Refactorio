@@ -6,13 +6,18 @@ description: >
   rename a class/function/type/symbol, move a file to another package/directory,
   delete a file and clean up its imports, rename a package — including an
   external one such as javax.* -> jakarta.* — find where a symbol is used,
-  or see local statistics on how
-  Refactorio itself has been used. Triggers: "rename class X to Y",
-  "move FileA to package/dir", "delete class Z and clean references",
-  "rename package com.foo to com.bar", "migrate javax to jakarta",
-  "swap dependency package X for Y", "where is Foo used", "find usages of Bar",
-  "refactorio stats", "how much code has refactorio changed",
-  "which refactorings fail most".
+  remove comments that merely restate the code or are commented-out code,
+  check what Refactorio can see in a project, or see local statistics on how
+  Refactorio itself has been used.
+  Triggers: "rename class X to Y", "move FileA to package/dir",
+  "delete class Z and clean references", "rename package com.foo to com.bar",
+  "migrate javax to jakarta", "swap dependency package X for Y",
+  "where is Foo used", "find usages of Bar",
+  "remove useless comments", "clean up the comments",
+  "strip docstrings that say nothing", "delete commented-out code",
+  "too many generated comments", "refactorio stats",
+  "how much code has refactorio changed", "which refactorings fail most",
+  "refactorio can't find my package", "why did the rename miss files".
   Prefer this over hand-editing each file when the change spans multiple files.
 ---
 
@@ -65,6 +70,8 @@ supports `--help` for the full usage including arguments table and examples.
 | rollback | `refactorio rollback` |
 | history | `refactorio history` |
 | stats | `refactorio stats [scope=project\|all] [since=7d]` |
+| doctor | `refactorio doctor` — what Refactorio can see (modules, source roots, files) |
+| clean-comments | `refactorio clean-comments in=<path> [mode=report\|apply]` |
 
 Common args: `root=<dir>` (project root, defaults to cwd), `dry-run=true`
 (preview without writing). Get detailed help with `refactorio <cmd> --help`.
@@ -211,6 +218,55 @@ for, which refactors fail most often, or how much code it has rewritten. Add
 If a user objects to the recording, tell them to set `REFACTORIO_NO_STATS=1`;
 `refactorio stats reset=true` clears what is already stored.
 
+## Cleaning comments
+
+`clean-comments` removes the comments from a file or tree. It reports by
+default and writes nothing until `mode=apply`.
+
+```bash
+refactorio clean-comments in=src                 # report: what goes, what stays
+refactorio clean-comments in=src mode=apply      # remove them
+```
+
+It keeps only three things: build/linter directives (`//go:embed`, `//nolint`,
+`# noqa`, `eslint-*`), licence and copyright headers, and TODO/FIXME markers.
+Everything else goes — doc comments, docstrings, commented-out code, banners,
+trailing comments and why-comments. There are no categories or thresholds.
+
+**Show the user the report before applying**, and quote the "kept" list: it is
+the whole of what the command decided. Warn that this is a large, one-way
+change on a big tree, and that `refactorio rollback` undoes it.
+
+In a language whose formatter aligns trailing comments (Go especially),
+suggest running that formatter afterwards — stripping the comments from an
+aligned block leaves stale padding.
+
+## When a command finds nothing, or fewer files than expected
+
+Run `refactorio doctor` before concluding the symbol or package is absent.
+It prints the project root, build system, every module, its source roots and
+file counts — the exact set every other command works from.
+
+```bash
+refactorio doctor
+```
+
+Read it for two things:
+- **A module missing from the list** is a module no refactor will reach.
+  Refactorio reads build scripts rather than executing them, and sweeps the
+  filesystem for modules the script registers programmatically. A module with
+  a non-conventional source layout (`sourceSets.main.java.srcDirs`) can still
+  be missed.
+- **`warning: no source roots found`** means it can see no code at all; the
+  layout is not `<module>/src/<sourceSet>/<java|kotlin>`.
+
+Do not work around a short result by re-running with different `root=` values.
+`root=` only says where to start looking — detection climbs to the outermost
+project root from there, so a repository-wide rename is the default and
+pointing at a submodule does not narrow it. If `doctor` shows the module,
+the problem is elsewhere; report the `doctor` output to the user rather than
+guessing.
+
 ## Limitations to warn the user about
 
 When proposing a Refactorio refactor, mention the relevant caveat:
@@ -225,6 +281,11 @@ When proposing a Refactorio refactor, mention the relevant caveat:
 - **C# cross-project**: `.csproj` boundaries aren't tracked; usages may span
   projects that aren't reachable from the index root.
 - **Same-name collisions across packages** may need manual disambiguation.
+- **Non-conventional source layouts**: a module whose sources are not under
+  `src/<sourceSet>/<java|kotlin>` is invisible. Check with `refactorio doctor`
+  before a repository-wide change.
+- **Java `module-info.java`**: a package rename does NOT update `exports` or
+  `opens` entries. Tell the user to fix those by hand if the project uses JPMS.
 - **Package-private access (Java)**: when moving a class out of its package,
   Refactorio prints warnings about package-private references that will break.
   Decide with the user whether to make those symbols public first.

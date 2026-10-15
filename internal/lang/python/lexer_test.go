@@ -215,7 +215,6 @@ func TestTokenize_ByteRanges(t *testing.T) {
 
 func TestTokenize_LineContinuation(t *testing.T) {
 	tokens := Tokenize([]byte("x = 1 + \\\n2"))
-	// Backslash + newline should be skipped.
 	newlines := filterKind(tokens, TNewline)
 	if len(newlines) != 0 {
 		t.Errorf("backslash-newline should be skipped: %v", texts(newlines))

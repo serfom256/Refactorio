@@ -6,7 +6,6 @@ import (
 	"github.com/serfom256/refactorio/internal/lang/common"
 )
 
-// FileSymbols is the per-file structural data for Go source.
 type FileSymbols struct {
 	Package      string
 	PackageRange Range
@@ -16,41 +15,27 @@ type FileSymbols struct {
 
 type Range = common.Range
 
-// ImportDecl is one import spec. Go imports are package paths, not
-// individual symbols — every exported name from the package is
-// accessible via `pkg.Name`.
 type ImportDecl struct {
-	// Path is the import path string, e.g. "fmt", "github.com/foo/bar".
-	Path string
-	// Alias is the local name if aliased: `import f "fmt"` → Alias="f".
-	// "." for dot imports, "_" for side-effect imports. Empty = default.
-	Alias string
-	// Range covers the full import spec line.
-	Range Range
-	// PathRange covers just the string literal (inside quotes).
+	Path      string
+	Alias     string
+	Range     Range
 	PathRange Range
 }
 
-// PackageName returns the name used to reference this import in code.
-// For `import "fmt"` → "fmt". For `import f "fmt"` → "f".
-// For dot imports → "". For side-effect imports → "_".
 func (d ImportDecl) PackageName() string {
 	if d.Alias != "" {
 		return d.Alias
 	}
-	// Default: last element of the import path.
 	parts := strings.Split(d.Path, "/")
 	return parts[len(parts)-1]
 }
 
-// Declaration is a top-level func, type, var, or const.
 type Declaration struct {
 	Name      string
-	Kind      string // "func" | "method" | "type" | "var" | "const"
+	Kind      string
 	NameRange Range
-	IsExport  bool // starts with uppercase
-	// Receiver is non-empty for methods: `func (t *T) Foo()` → "T".
-	Receiver string
+	IsExport  bool
+	Receiver  string
 }
 
 func ExtractSymbols(src []byte) (*FileSymbols, error) {
@@ -118,7 +103,7 @@ func (p *goParser) parse() *FileSymbols {
 }
 
 func (p *goParser) parsePackage() (string, Range) {
-	p.skip() // "package"
+	p.skip()
 	p.skipComments()
 	if p.at().Kind != TIdent {
 		return "", Range{}
@@ -128,9 +113,8 @@ func (p *goParser) parsePackage() (string, Range) {
 	return tok.Text, Range{Start: tok.Start, End: tok.End, Line: tok.Line}
 }
 
-// parseImports handles both single and grouped imports.
 func (p *goParser) parseImports() []ImportDecl {
-	p.skip() // "import"
+	p.skip()
 	p.skipComments()
 
 	if p.text() == "(" {
@@ -143,7 +127,7 @@ func (p *goParser) parseImports() []ImportDecl {
 }
 
 func (p *goParser) parseGroupedImports() []ImportDecl {
-	p.skip() // "("
+	p.skip()
 	var out []ImportDecl
 	for p.pos < len(p.tokens) && p.text() != ")" {
 		p.skipComments()
@@ -163,14 +147,12 @@ func (p *goParser) parseGroupedImports() []ImportDecl {
 func (p *goParser) parseSingleImport() (ImportDecl, bool) {
 	imp := ImportDecl{Range: Range{Start: p.at().Start, Line: p.at().Line}}
 
-	// Optional alias: identifier or "." before the path string.
 	if p.at().Kind == TIdent || p.text() == "." {
 		imp.Alias = p.text()
 		p.skip()
 		p.skipComments()
 	}
 
-	// Path string.
 	if p.at().Kind == TString || p.at().Kind == TRawStr {
 		tok := p.at()
 		imp.Path = unquote(tok.Text)
@@ -183,12 +165,11 @@ func (p *goParser) parseSingleImport() (ImportDecl, bool) {
 }
 
 func (p *goParser) parseFunc() (Declaration, bool) {
-	p.skip() // "func"
+	p.skip()
 	p.skipComments()
 
 	d := Declaration{Kind: "func"}
 
-	// Method receiver: func (t *T) Name()
 	if p.text() == "(" {
 		d.Kind = "method"
 		d.Receiver = p.parseReceiverType()
@@ -205,18 +186,16 @@ func (p *goParser) parseFunc() (Declaration, bool) {
 	d.IsExport = isExported(d.Name)
 	p.skip()
 
-	// Skip signature + body.
 	p.skipToMatchingBrace()
 	return d, true
 }
 
-// parseReceiverType extracts the type name from `(t *T)` or `(t T)`.
 func (p *goParser) parseReceiverType() string {
-	p.skip() // "("
+	p.skip()
 	var typeName string
 	for p.pos < len(p.tokens) && p.text() != ")" {
 		if p.at().Kind == TIdent && !p.at().IsKeyword() {
-			typeName = p.text() // last non-keyword ident before )
+			typeName = p.text()
 		}
 		p.skip()
 	}
@@ -227,7 +206,7 @@ func (p *goParser) parseReceiverType() string {
 }
 
 func (p *goParser) parseTypeDecls() []Declaration {
-	p.skip() // "type"
+	p.skip()
 	p.skipComments()
 
 	if p.text() == "(" {
@@ -240,7 +219,7 @@ func (p *goParser) parseTypeDecls() []Declaration {
 }
 
 func (p *goParser) parseGroupedTypeDecls() []Declaration {
-	p.skip() // "("
+	p.skip()
 	var out []Declaration
 	for p.pos < len(p.tokens) && p.text() != ")" {
 		p.skipComments()
@@ -272,13 +251,11 @@ func (p *goParser) parseSingleTypeDecl() (Declaration, bool) {
 	}
 	p.skip()
 
-	// Skip the type body (struct{...}, interface{...}, or simple type).
 	for p.pos < len(p.tokens) {
 		if p.text() == "{" {
 			p.skipBraces()
 			break
 		}
-		// Stop at next declaration boundary.
 		if p.text() == ")" || (p.at().Kind == TIdent && isTopLevel(p.text())) {
 			break
 		}
@@ -288,7 +265,7 @@ func (p *goParser) parseSingleTypeDecl() (Declaration, bool) {
 }
 
 func (p *goParser) parseVarConst(kind string) []Declaration {
-	p.skip() // "var" or "const"
+	p.skip()
 	p.skipComments()
 
 	if p.text() == "(" {
@@ -301,7 +278,7 @@ func (p *goParser) parseVarConst(kind string) []Declaration {
 }
 
 func (p *goParser) parseGroupedVarConst(kind string) []Declaration {
-	p.skip() // "("
+	p.skip()
 	var out []Declaration
 	for p.pos < len(p.tokens) && p.text() != ")" {
 		p.skipComments()
@@ -333,9 +310,6 @@ func (p *goParser) parseSingleVarConst(kind string) (Declaration, bool) {
 	}
 	p.skip()
 	startLine := tok.Line
-	// Skip the rest of this declaration. In grouped blocks, each
-	// declaration typically occupies one line; stop when we see a
-	// token on a new line (the next declaration).
 	for p.pos < len(p.tokens) {
 		if p.text() == ")" || (p.at().Kind == TIdent && isTopLevel(p.text())) {
 			break

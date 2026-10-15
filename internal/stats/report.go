@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-// Load reads every event in the log. Malformed lines are skipped rather than
-// failing the read: a truncated final line from an interrupted write should
-// not make the whole history unreadable.
 func Load() ([]Event, error) {
 	path, err := LogPath()
 	if err != nil {
@@ -45,8 +42,6 @@ func Load() ([]Event, error) {
 	return out, sc.Err()
 }
 
-// Filter narrows events to a project (empty means all) and a time window
-// (zero means unbounded).
 func Filter(evs []Event, project string, since time.Time) []Event {
 	var out []Event
 	for _, ev := range evs {
@@ -61,11 +56,8 @@ func Filter(evs []Event, project string, since time.Time) []Event {
 	return out
 }
 
-// Summary is the aggregated view rendered by the stats command.
 type Summary struct {
-	Total int `json:"total"`
-	// Since is nil when the report is unbounded. A zero time.Time would
-	// serialise as year 1 rather than being omitted.
+	Total    int           `json:"total"`
 	Since    *time.Time    `json:"since,omitempty"`
 	Project  string        `json:"project,omitempty"`
 	Commands []CommandStat `json:"commands"`
@@ -75,24 +67,20 @@ type Summary struct {
 	Code     CodeStat      `json:"code"`
 }
 
-// CommandStat is per-command usage.
 type CommandStat struct {
-	Name    string `json:"name"`
-	Runs    int    `json:"runs"`
-	OK      int    `json:"ok"`
-	Err     int    `json:"err"`
-	DryRuns int    `json:"dry_runs"`
-	// LinesChanged counts only applied runs; a dry run rewrites nothing.
-	LinesChanged int `json:"lines_changed"`
+	Name         string `json:"name"`
+	Runs         int    `json:"runs"`
+	OK           int    `json:"ok"`
+	Err          int    `json:"err"`
+	DryRuns      int    `json:"dry_runs"`
+	LinesChanged int    `json:"lines_changed"`
 }
 
-// CountStat is a generic name/count pair.
 type CountStat struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
 }
 
-// CodeStat totals the code actually rewritten, excluding dry runs and failures.
 type CodeStat struct {
 	LinesChanged int `json:"lines_changed"`
 	LinesMoved   int `json:"lines_moved"`
@@ -101,8 +89,6 @@ type CodeStat struct {
 	Edits        int `json:"edits"`
 }
 
-// Summarise aggregates events. Dry runs and failed runs are counted as usage
-// but never as code changed — nothing reached disk.
 func Summarise(evs []Event, project string, since time.Time) Summary {
 	s := Summary{Total: len(evs), Project: project}
 	if !since.IsZero() {
@@ -181,7 +167,6 @@ func topCounts(m map[string]int, limit int) []CountStat {
 	return out
 }
 
-// FormatText renders a Summary for the terminal.
 func FormatText(w io.Writer, s Summary) error {
 	var b strings.Builder
 
@@ -239,7 +224,6 @@ func FormatText(w io.Writer, s Summary) error {
 	return err
 }
 
-// FormatJSON renders a Summary as JSON.
 func FormatJSON(w io.Writer, s Summary) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

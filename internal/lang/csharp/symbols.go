@@ -8,16 +8,12 @@ import (
 
 type Range = common.Range
 
-// FileSymbols is the per-file structural data for C# source.
 type FileSymbols struct {
-	// Namespace is the namespace declared in the file (block or
-	// file-scoped). Empty if the file has no namespace declaration.
 	Namespace      string
 	NamespaceRange Range
-	// FileScoped is true when the file uses `namespace Foo;` form.
-	FileScoped bool
-	Usings     []UsingDecl
-	Types      []TypeDecl
+	FileScoped     bool
+	Usings         []UsingDecl
+	Types          []TypeDecl
 }
 
 type UsingDecl struct {
@@ -31,21 +27,19 @@ type UsingDecl struct {
 
 type TypeDecl struct {
 	Name       string
-	Kind       string // "class" | "interface" | "struct" | "enum" | "record" | "delegate"
+	Kind       string
 	NameRange  Range
 	BodyRange  Range
 	Methods    []MemberDecl
 	Fields     []MemberDecl
 	Properties []MemberDecl
 	Nested     []TypeDecl
-	// IsPublic is true for public top-level types. Other top-level
-	// types are internal (the C# default).
-	IsPublic bool
+	IsPublic   bool
 }
 
 type MemberDecl struct {
 	Name      string
-	Kind      string // "method" | "constructor" | "field" | "property"
+	Kind      string
 	NameRange Range
 }
 
@@ -87,7 +81,6 @@ func (p *csParser) parse() *FileSymbols {
 		}
 		tok := p.at()
 
-		// `global using ...`
 		if tok.Kind == TIdent && tok.Text == "global" && p.peekText(1) == "using" {
 			p.skip()
 			imp := p.parseUsing()
@@ -114,8 +107,6 @@ func (p *csParser) parse() *FileSymbols {
 			fs.NamespaceRange = nsRange
 			fs.FileScoped = fileScoped
 			pendingPublic = false
-			// Block-scoped namespaces wrap the rest of the file in
-			// `{ ... }` — we descend into it.
 			if !fileScoped {
 				p.parseInsideNamespace(fs)
 				return fs
@@ -123,7 +114,6 @@ func (p *csParser) parse() *FileSymbols {
 			continue
 		}
 
-		// Visibility modifier preceding a top-level type.
 		if tok.Kind == TIdent && tok.Text == "public" {
 			pendingPublic = true
 			p.skip()
@@ -133,7 +123,6 @@ func (p *csParser) parse() *FileSymbols {
 			p.skip()
 			continue
 		}
-		// Attribute: [Foo] or [Foo(args)]
 		if tok.Kind == TPunct && tok.Text == "[" {
 			p.skipBrackets()
 			continue
@@ -153,9 +142,7 @@ func (p *csParser) parse() *FileSymbols {
 	return fs
 }
 
-// parseInsideNamespace handles a block-scoped namespace body.
 func (p *csParser) parseInsideNamespace(fs *FileSymbols) {
-	// p is currently AT '{'
 	if p.text() != "{" {
 		return
 	}
@@ -216,11 +203,9 @@ func (p *csParser) parseInsideNamespace(fs *FileSymbols) {
 	}
 }
 
-// parseUsing handles `using A.B.C;`, `using static A.B;`,
-// `using X = A.B.C;`. p is currently AT `using`.
 func (p *csParser) parseUsing() UsingDecl {
 	u := UsingDecl{Range: Range{Start: p.at().Start, Line: p.at().Line}}
-	p.skip() // "using"
+	p.skip()
 	p.skipComments()
 
 	if p.at().Kind == TIdent && p.text() == "static" {
@@ -229,12 +214,10 @@ func (p *csParser) parseUsing() UsingDecl {
 		p.skipComments()
 	}
 
-	// Could be `using Name = Path;` (alias).
-	// Peek: if we see an ident followed by '=', it's an alias.
 	if p.at().Kind == TIdent && p.peekText(1) == "=" {
 		u.Alias = p.text()
 		p.skip()
-		p.skip() // "="
+		p.skip()
 		p.skipComments()
 	}
 
@@ -265,11 +248,8 @@ func (p *csParser) parseUsing() UsingDecl {
 	return u
 }
 
-// parseNamespace returns (name, range, fileScoped). p is currently AT
-// `namespace`. After return, p is positioned past the `;` for file-
-// scoped, or AT the `{` for block-scoped.
 func (p *csParser) parseNamespace() (string, Range, bool) {
-	p.skip() // "namespace"
+	p.skip()
 	p.skipComments()
 	start := p.pos
 	for p.pos < len(p.tokens) && p.text() != ";" && p.text() != "{" {
@@ -289,7 +269,6 @@ func (p *csParser) parseNamespace() (string, Range, bool) {
 		p.skip()
 		return name.String(), r, true
 	}
-	// p.text() == "{" — block scope; leave caller to descend.
 	return name.String(), r, false
 }
 
@@ -307,14 +286,12 @@ func (p *csParser) atTypeKeyword() bool {
 
 func (p *csParser) parseType() (TypeDecl, bool) {
 	td := TypeDecl{Kind: p.text()}
-	p.skip() // keyword
+	p.skip()
 	p.skipComments()
-	// `record class` / `record struct`
 	if td.Kind == "record" && (p.text() == "class" || p.text() == "struct") {
 		p.skip()
 		p.skipComments()
 	}
-	// Skip generic params <T>
 	for p.pos < len(p.tokens) && (p.at().Kind != TIdent || p.at().IsKeyword()) {
 		if p.text() == "<" {
 			p.skipAngleBrackets()
@@ -330,8 +307,6 @@ func (p *csParser) parseType() (TypeDecl, bool) {
 	td.NameRange = Range{Start: name.Start, End: name.End, Line: name.Line}
 	p.skip()
 
-	// Skip generics on the name, base list (`: Foo, Bar`), constraints
-	// (`where T : class`), and primary-constructor parens for records.
 	for p.pos < len(p.tokens) && p.text() != "{" && p.text() != ";" {
 		switch p.text() {
 		case "<":
@@ -342,7 +317,6 @@ func (p *csParser) parseType() (TypeDecl, bool) {
 			p.skip()
 		}
 	}
-	// enum/delegate may use ; (delegate); records may use ; too.
 	if p.text() == ";" {
 		p.skip()
 		return td, true
@@ -351,7 +325,7 @@ func (p *csParser) parseType() (TypeDecl, bool) {
 		return td, true
 	}
 	bodyStart := p.at().Start
-	p.skip() // {
+	p.skip()
 	p.parseTypeBody(&td)
 	bodyEnd := p.tokens[p.pos-1].End
 	td.BodyRange = Range{Start: bodyStart, End: bodyEnd, Line: csLineFor(bodyStart, p.src)}
@@ -380,19 +354,16 @@ func (p *csParser) parseTypeBody(td *TypeDecl) {
 			p.skip()
 			continue
 		}
-		// Attribute on a member
 		if tok.Text == "[" {
 			p.skipBrackets()
 			continue
 		}
-		// Nested type (direct child)
 		if p.atTypeKeyword() {
 			if nested, ok := p.parseType(); ok {
 				td.Nested = append(td.Nested, nested)
 			}
 			continue
 		}
-		// Try to recognise a member.
 		if tok.Kind == TIdent {
 			members := p.tryParseMembers(td.Name)
 			for _, m := range members {
@@ -411,27 +382,16 @@ func (p *csParser) parseTypeBody(td *TypeDecl) {
 	}
 }
 
-// tryParseMembers handles a single declaration:
-//
-//	modifiers... type name ( ... ) { ... }     // method
-//	modifiers... ClassName ( ... ) { ... }     // constructor
-//	modifiers... type name { get; set; }       // property
-//	modifiers... type name = expr;             // field
-//	modifiers... type name1, name2, name3;     // field (multi)
 func (p *csParser) tryParseMembers(className string) []MemberDecl {
 	save := p.pos
 
-	// Skip modifiers.
 	for p.pos < len(p.tokens) && p.at().Kind == TIdent && isCSModifier(p.text()) {
 		p.skip()
 	}
-	// Skip attributes (in case of inline).
 	for p.text() == "[" {
 		p.skipBrackets()
 	}
 
-	// Collect identifier tokens, skipping generics and type syntax,
-	// until we find a parenthesis (method/constructor) or `{`/`;`/`=`/`,` (property/field).
 	var idents []Token
 	for p.pos < len(p.tokens) {
 		tok := p.at()
@@ -459,7 +419,6 @@ func (p *csParser) tryParseMembers(className string) []MemberDecl {
 			p.skip()
 			continue
 		}
-		// '(' → method or constructor
 		if tok.Text == "(" && len(idents) > 0 {
 			name := idents[len(idents)-1]
 			kind := "method"
@@ -467,15 +426,12 @@ func (p *csParser) tryParseMembers(className string) []MemberDecl {
 				kind = "constructor"
 			}
 			p.skipBalanced('(', ')')
-			// Method body or `=> expr;` or `;` (abstract/interface)
 			for p.text() == "where" || p.text() == ":" {
-				// skip `where T : ...` / base call `: base(args)`
 				p.skipUntil("{", ";")
 			}
 			if p.text() == "{" {
 				p.skipBalanced('{', '}')
 			} else if p.text() == "=>" {
-				// expression-bodied; skip until ;
 				for p.pos < len(p.tokens) && p.text() != ";" {
 					p.skip()
 				}
@@ -490,25 +446,15 @@ func (p *csParser) tryParseMembers(className string) []MemberDecl {
 				NameRange: Range{Start: name.Start, End: name.End, Line: name.Line},
 			}}
 		}
-		// '{' → property (already broken out above, but we need to catch
-		// the case where we see `{` right after the name)
-		// Actually '{' is broken out at top; let me re-handle:
-		// property: type name {
-		// We need to detect `{` here. But the loop breaks on '{'. Let me
-		// add a specific check just before breaking.
-		// '=' or ';' or ',' → field
 		if (tok.Text == ";" || tok.Text == "=" || tok.Text == ",") && len(idents) > 0 {
 			return p.parseFieldDeclarators(idents)
 		}
-		// Anything else — give up
 		break
 	}
 
-	// If we collected idents and the next non-token is '{', it might be a property.
 	if len(idents) > 0 && p.text() == "{" {
 		name := idents[len(idents)-1]
 		p.skipBalanced('{', '}')
-		// optional initializer: = expr;
 		if p.text() == "=" {
 			for p.pos < len(p.tokens) && p.text() != ";" {
 				p.skip()

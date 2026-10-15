@@ -22,7 +22,6 @@ func TestParse_OK(t *testing.T) {
 }
 
 func TestParse_ValueMayContainEquals(t *testing.T) {
-	// AST-replace patterns will contain `=`. Only the first `=` separates.
 	a, err := Parse([]string{"ast-replace", "find=a == b", "replace=a.Eq(b)"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

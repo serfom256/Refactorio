@@ -41,7 +41,6 @@ console.log(greet("world"));
 }
 
 func TestJSRename_MixedJSAndTS(t *testing.T) {
-	// JS file imports from a TS file — cross-language rename.
 	idx, root := mk(t, map[string]string{
 		"src/foo.ts": `export class Foo { bar() { return 1; } }`,
 		"src/main.js": `import { Foo } from './foo';
@@ -114,19 +113,15 @@ export function App() { return <Button label="click" />; }
 	}
 }
 
-// CommonJS support test — verifies we need to add require() handling.
 func TestJSExtract_CommonJSRequire(t *testing.T) {
 	src := []byte(`const Foo = require('./foo');
 const { bar } = require('./bar');
 module.exports = { Foo };
 `)
 	fs, _ := typescript.ExtractSymbols(src)
-	// Currently require() is NOT parsed as an import.
-	// This test documents the gap.
 	if len(fs.Imports) > 0 {
 		t.Logf("CommonJS require detected as import — great!")
 	} else {
 		t.Logf("CommonJS require NOT detected (expected — ES modules only)")
 	}
-	// Not a failure — just documenting the current state.
 }

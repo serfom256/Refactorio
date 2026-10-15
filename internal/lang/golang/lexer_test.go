@@ -113,7 +113,7 @@ func TestIsValidIdentifier(t *testing.T) {
 		{"123foo", false},
 		{"foo-bar", false},
 		{"foo bar", false},
-		{"$foo", false}, // $ not valid in Go
+		{"$foo", false},
 	}
 	for _, tc := range cases {
 		if got := IsValidIdentifier(tc.in); got != tc.want {

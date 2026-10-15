@@ -1,6 +1,3 @@
-// Package typescript index builds a map of every TS/JS file in a
-// directory tree: its symbols, its imports, and which files import
-// each export. This powers cross-file rename and move operations.
 package typescript
 
 import (
@@ -10,24 +7,17 @@ import (
 	"sync"
 )
 
-// Index holds the project-wide view of TS/JS files.
 type Index struct {
-	files map[string]*FileEntry // abs path → entry
-	// byExport maps "absPath::exportName" → declaring FileEntry.
-	// Used to find where a symbol is declared.
+	files    map[string]*FileEntry
 	byExport map[string]*FileEntry
 }
 
-// FileEntry is one parsed source file.
 type FileEntry struct {
 	Path    string
 	Symbols *FileSymbols
 	Err     error
 }
 
-// BuildIndex walks root for .ts/.tsx/.js/.jsx files (excluding
-// node_modules, dist, build, .git), parses each, and builds the
-// lookup tables.
 func BuildIndex(root string) (*Index, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -117,12 +107,10 @@ func (idx *Index) buildExportMap() {
 	}
 }
 
-// File returns the entry for an exact path.
 func (idx *Index) File(path string) *FileEntry {
 	return idx.files[path]
 }
 
-// AllFiles returns every indexed file path.
 func (idx *Index) AllFiles() []string {
 	out := make([]string, 0, len(idx.files))
 	for p := range idx.files {
@@ -131,8 +119,6 @@ func (idx *Index) AllFiles() []string {
 	return out
 }
 
-// FindDeclaration locates the file and declaration where symbolName
-// is exported. If file hint is provided, searches that file first.
 func (idx *Index) FindDeclaration(symbolName, fileHint string) (*FileEntry, *Declaration) {
 	if fileHint != "" {
 		fe := idx.files[fileHint]
@@ -144,7 +130,6 @@ func (idx *Index) FindDeclaration(symbolName, fileHint string) (*FileEntry, *Dec
 			}
 		}
 	}
-	// Search all files.
 	for _, fe := range idx.files {
 		if fe.Symbols == nil {
 			continue
@@ -159,8 +144,6 @@ func (idx *Index) FindDeclaration(symbolName, fileHint string) (*FileEntry, *Dec
 	return nil, nil
 }
 
-// FilesImporting returns paths of files that import from the given
-// absolute file path (resolving relative import paths).
 func (idx *Index) FilesImporting(targetFile string) []string {
 	var out []string
 	for path, fe := range idx.files {
@@ -178,8 +161,6 @@ func (idx *Index) FilesImporting(targetFile string) []string {
 	return out
 }
 
-// ImportsOf returns the import declarations in file that reference
-// targetFile.
 func (idx *Index) ImportsOf(file, targetFile string) []ImportDecl {
 	fe := idx.files[file]
 	if fe == nil || fe.Symbols == nil {
@@ -195,26 +176,20 @@ func (idx *Index) ImportsOf(file, targetFile string) []ImportDecl {
 	return out
 }
 
-// ComputeNewImportPath computes the relative import path from
-// fromFile to toFile, without extension, using POSIX separators.
 func ComputeNewImportPath(fromFile, toFile string) string {
 	fromDir := filepath.Dir(fromFile)
 	rel, err := filepath.Rel(fromDir, toFile)
 	if err != nil {
 		return toFile
 	}
-	// Convert to POSIX separators.
 	rel = strings.ReplaceAll(rel, string(filepath.Separator), "/")
-	// Strip extension.
 	for _, ext := range []string{".tsx", ".ts", ".jsx", ".js", ".mts", ".cts", ".mjs", ".cjs"} {
 		if strings.HasSuffix(rel, ext) {
 			rel = rel[:len(rel)-len(ext)]
 			break
 		}
 	}
-	// Strip /index suffix.
 	rel = strings.TrimSuffix(rel, "/index")
-	// Ensure relative prefix.
 	if !strings.HasPrefix(rel, ".") {
 		rel = "./" + rel
 	}

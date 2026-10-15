@@ -3,8 +3,6 @@ package refs
 import "testing"
 
 func TestDangling(t *testing.T) {
-	// An import statement occupying bytes 0..20, with the identifier it
-	// binds appearing inside it at 7 and again in code at 30.
 	imp := []Span{{Start: 0, End: 20}}
 
 	tests := []struct {

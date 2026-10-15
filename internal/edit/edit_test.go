@@ -19,7 +19,6 @@ func TestApplyToBytes_SingleEdit(t *testing.T) {
 }
 
 func TestApplyToBytes_MultipleNonOverlapping(t *testing.T) {
-	// "foo bar foo" -> rename foo->qux at both positions
 	src := []byte("foo bar foo")
 	out, err := applyToBytes(src, []Edit{
 		{Start: 0, End: 3, NewText: "qux"},
@@ -43,7 +42,6 @@ func TestValidate_OverlapDetected(t *testing.T) {
 }
 
 func TestValidate_AdjacentOK(t *testing.T) {
-	// End-exclusive: [0,3) and [3,6) touch but do not overlap.
 	s := NewSet()
 	s.Add(Edit{File: "a", Start: 0, End: 3, NewText: "x"})
 	s.Add(Edit{File: "a", Start: 3, End: 6, NewText: "y"})
@@ -80,7 +78,7 @@ func TestApply_RoundTrip(t *testing.T) {
 func TestApply_AtomicRollbackOnSecondFileFailure(t *testing.T) {
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.go")
-	b := filepath.Join(dir, "missing", "b.go") // dir does not exist
+	b := filepath.Join(dir, "missing", "b.go")
 	if err := os.WriteFile(a, []byte("foo"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +88,6 @@ func TestApply_AtomicRollbackOnSecondFileFailure(t *testing.T) {
 	if err := s.Apply(); err == nil {
 		t.Fatalf("expected error from missing file")
 	}
-	// a.go should be untouched.
 	got, _ := os.ReadFile(a)
 	if string(got) != "foo" {
 		t.Errorf("a.go was modified: %q", got)
@@ -144,7 +141,6 @@ func TestFiles_DistinctPreserveOrder(t *testing.T) {
 func TestDryRun_GroupsRepeatedEditsOntoOneLine(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "src.go")
-	// "foo" on lines 1, 3 and 4.
 	src := "foo\nbar\nfoo\nfoo\n"
 	if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
@@ -163,7 +159,6 @@ func TestDryRun_GroupsRepeatedEditsOntoOneLine(t *testing.T) {
 	if strings.Contains(out, "3 edits\n    1 ") {
 		t.Errorf("expected grouped output, got per-edit lines: %q", out)
 	}
-	// The file must be named once, not once per edit.
 	if n := strings.Count(out, p); n != 1 {
 		t.Errorf("path repeated %d times, want 1: %q", n, out)
 	}
@@ -192,8 +187,6 @@ func TestDryRun_DistinctReasonsStaySeparate(t *testing.T) {
 
 func TestDryRun_PathsRelativeToWorkingDir(t *testing.T) {
 	dir := t.TempDir()
-	// t.TempDir may sit behind a symlink (/var -> /private/var on macOS);
-	// resolve it so the path we compare against is the one Getwd reports.
 	dir, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -230,8 +223,6 @@ func TestDryRun_PathsRelativeToWorkingDir(t *testing.T) {
 }
 
 func TestRelTo_LeavesPathsOutsideBaseAlone(t *testing.T) {
-	// A path that is not under base must stay absolute rather than turn
-	// into a chain of "..", which would be unreadable and ambiguous.
 	got := RelTo(filepath.FromSlash("/a/b"), filepath.FromSlash("/c/d/e.go"))
 	if got != filepath.FromSlash("/c/d/e.go") {
 		t.Errorf("got %q, want the absolute path unchanged", got)
@@ -264,7 +255,6 @@ func TestFormatLines_CollapsesRepeats(t *testing.T) {
 func TestMeasure_CountsDistinctLinesNotEdits(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "src.go")
-	// Two edits on line 1, one on line 3.
 	if err := os.WriteFile(p, []byte("foo foo\nbar\nfoo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +282,6 @@ func TestMeasure_CountsMovedAndDeletedLines(t *testing.T) {
 	if err := os.WriteFile(moved, []byte("a\nb\nc\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// No trailing newline: the last line must still count.
 	if err := os.WriteFile(deleted, []byte("a\nb"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +301,7 @@ func TestMeasure_CountsMovedAndDeletedLines(t *testing.T) {
 func TestMeasure_MissingFileIsSkippedNotFatal(t *testing.T) {
 	s := NewSet()
 	s.Add(Edit{File: filepath.Join(t.TempDir(), "gone.go"), Start: 0, End: 1, NewText: "x"})
-	m := s.Measure() // must not panic
+	m := s.Measure()
 	if m.LinesChanged != 0 {
 		t.Errorf("LinesChanged = %d, want 0", m.LinesChanged)
 	}

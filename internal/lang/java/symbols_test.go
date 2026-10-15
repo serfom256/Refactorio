@@ -86,7 +86,6 @@ public class Demo {
 		t.Errorf("Demo: name=%q kind=%q", demo.Name, demo.Kind)
 	}
 
-	// Fields: a, b, c, s
 	gotFields := memberNames(demo.Fields)
 	wantFields := []string{"a", "b", "c", "s"}
 	sort.Strings(gotFields)
@@ -95,7 +94,6 @@ public class Demo {
 		t.Errorf("fields = %v, want %v", gotFields, wantFields)
 	}
 
-	// Methods + constructors. Two ctors + two fizzBuzz methods.
 	gotMethods := memberNames(demo.Methods)
 	sort.Strings(gotMethods)
 	wantMethods := []string{"Demo", "Demo", "fizzBuzz", "fizzBuzz"}
@@ -103,7 +101,6 @@ public class Demo {
 	if !reflect.DeepEqual(gotMethods, wantMethods) {
 		t.Errorf("methods = %v, want %v", gotMethods, wantMethods)
 	}
-	// Verify constructor vs method kinds.
 	ctorCount, methCount := 0, 0
 	for _, m := range demo.Methods {
 		switch m.Kind {
@@ -119,7 +116,6 @@ public class Demo {
 		t.Errorf("constructors=%d methods=%d, want 2,2", ctorCount, methCount)
 	}
 
-	// Nested types: Inner (class) + Listener (interface)
 	if len(demo.Nested) != 2 {
 		t.Fatalf("nested = %d, want 2", len(demo.Nested))
 	}
@@ -153,10 +149,6 @@ public enum Color {
 	if c.Kind != "enum" {
 		t.Errorf("Kind = %q, want enum", c.Kind)
 	}
-	// We descend through enum_body_declarations, so the method+field
-	// should be picked up. (Enum constants RED/GREEN/BLUE are NOT
-	// reported as fields — they have their own node kind. That is fine
-	// for v1; we will revisit if a rename needs to touch them.)
 	if len(c.Methods) != 1 || c.Methods[0].Name != "label" {
 		t.Errorf("methods = %v", c.Methods)
 	}
@@ -166,8 +158,6 @@ public enum Color {
 }
 
 func TestExtractSymbols_NameRangePointsAtIdentifier(t *testing.T) {
-	// NameRange must cover just the identifier, not the whole decl.
-	// This is what the rename op will use to splice the new name in.
 	src := []byte(`class Foo {}
 `)
 	fs, _ := ExtractSymbols(src)
@@ -206,7 +196,6 @@ class B {
 }
 
 func TestExtractSymbols_TolerantToParseErrors(t *testing.T) {
-	// Missing semicolon — still parseable enough to extract.
 	src := []byte(`package com.foo
 
 class Demo {
@@ -233,9 +222,6 @@ func memberNames(ms []MemberDecl) []string {
 	return out
 }
 
-// An annotation type declaration must be indexed as a type. The top-level
-// loop used to read `@interface` as a use of an annotation named "interface"
-// and skip it, so annotation-only packages looked empty.
 func TestExtractSymbols_AnnotationTypeDeclaration(t *testing.T) {
 	for name, src := range map[string]string{
 		"public, preceded by meta-annotations": `package com.x;
@@ -261,8 +247,6 @@ public @interface Table { String value(); }
 	}
 }
 
-// Ordinary annotations on a class must still be skipped as usages, not
-// mistaken for declarations.
 func TestExtractSymbols_AnnotatedClassIsStillAClass(t *testing.T) {
 	src := "package com.x;\n@Deprecated\n@SuppressWarnings(\"all\")\npublic class Foo {}\n"
 	fs, err := ExtractSymbols([]byte(src))

@@ -55,7 +55,6 @@ public class Main {
 	if err := set.Apply(); err != nil {
 		t.Fatal(err)
 	}
-	// File renamed.
 	if _, err := os.Stat(filepath.Join(root, "Bar.cs")); err != nil {
 		t.Errorf("file not renamed: %v", err)
 	}
@@ -155,8 +154,6 @@ public class Foo {
 	file := filepath.Join(root, "Foo.cs")
 	set, err := PlanRename(RenameRequest{File: file, Symbol: "name", NewName: "who", Index: idx})
 	if err != nil {
-		// `name` isn't a declaration we expose; skip — this just checks
-		// that interpolation doesn't crash. The class is what we test.
 	}
 	_ = set
 	_ = root

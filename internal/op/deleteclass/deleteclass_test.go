@@ -184,8 +184,6 @@ public class User { Bar b; }
 	}
 }
 
-// A file whose only mention of the deleted class is the import we are
-// about to remove needs no manual cleanup, so it must not be reported.
 func TestDeleteClass_DeadImportOnlyIsNotReported(t *testing.T) {
 	idx, _ := mk(t, map[string]string{
 		"build.gradle":                   "",

@@ -11,7 +11,7 @@ type Index struct {
 	Root      string
 	CrateName string
 	files     map[string]*FileEntry
-	byModule  map[string][]string // module path → files
+	byModule  map[string][]string
 }
 
 type FileEntry struct {
@@ -104,11 +104,6 @@ func (idx *Index) buildModuleMap() {
 	}
 }
 
-// FileToModulePath computes the Rust module path for a file.
-// src/lib.rs → "crate"
-// src/foo.rs → "crate::foo"
-// src/foo/mod.rs → "crate::foo"
-// src/foo/bar.rs → "crate::foo::bar"
 func (idx *Index) FileToModulePath(file string) string {
 	srcDir := filepath.Join(idx.Root, "src")
 	rel, err := filepath.Rel(srcDir, file)
@@ -137,8 +132,6 @@ func (idx *Index) AllFiles() []string {
 	return out
 }
 
-// FilesUsing returns files that have a `use` path matching or prefixed
-// by the given module path + symbol.
 func (idx *Index) FilesUsing(modulePath, symbol string) []string {
 	fullPath := modulePath + "::" + symbol
 	var out []string
@@ -151,7 +144,6 @@ func (idx *Index) FilesUsing(modulePath, symbol string) []string {
 				out = append(out, path)
 				break
 			}
-			// Glob use: `use crate::foo::*`
 			if strings.HasSuffix(u.Path, "::*") {
 				prefix := strings.TrimSuffix(u.Path, "::*")
 				if prefix == modulePath {
@@ -164,7 +156,6 @@ func (idx *Index) FilesUsing(modulePath, symbol string) []string {
 	return out
 }
 
-// FilesInModule returns all files in the given module path.
 func (idx *Index) FilesInModule(modulePath string) []string {
 	return idx.byModule[modulePath]
 }

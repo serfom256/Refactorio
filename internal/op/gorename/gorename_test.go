@@ -268,9 +268,6 @@ func TestGoMove_SamePackage(t *testing.T) {
 	}
 }
 
-// Deleting the last file in a package removes the import from dependents.
-// Only those that still qualify an identifier with the package name need
-// manual cleanup.
 func TestPlanDelete_DeadImportOnlyIsNotReported(t *testing.T) {
 	idx, root := mk(t, map[string]string{
 		"go.mod":     "module example.com/p\n\ngo 1.23\n",
@@ -291,7 +288,6 @@ func TestPlanDelete_DeadImportOnlyIsNotReported(t *testing.T) {
 	}
 }
 
-// An aliased import means the alias is the qualifier that dangles.
 func TestPlanDelete_TracksAliasedImport(t *testing.T) {
 	idx, root := mk(t, map[string]string{
 		"go.mod":     "module example.com/p\n\ngo 1.23\n",

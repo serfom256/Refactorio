@@ -11,7 +11,6 @@ import (
 	"github.com/serfom256/refactorio/internal/op/refs"
 )
 
-// DeleteRequest removes a Go file and cleans imports in dependents.
 type DeleteRequest struct {
 	File  string
 	Index *golang.Index
@@ -34,9 +33,6 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 	set := edit.NewSet()
 	var filesWithRefs []string
 
-	// If this is the only file in the package, remove the import from
-	// all importing files. If there are other files in the package,
-	// the import stays valid.
 	pkgFiles := req.Index.FilesInPackage(pkg)
 	isLastInPkg := len(pkgFiles) <= 1
 
@@ -57,9 +53,6 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 					NewText: "", Why: fmt.Sprintf("remove import for deleted package %s", pkg),
 				})
 				spans = append(spans, refs.Span{Start: imp.Range.Start, End: imp.Range.End})
-				// The qualifier is what dangles: after the import goes, every
-				// remaining `pkg.Symbol` stops compiling. A dot import binds no
-				// qualifier, so PackageName is empty and nothing is tracked.
 				bound = append(bound, imp.PackageName())
 			}
 			if danglingGo(path, bound, spans) {
@@ -72,10 +65,9 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 	return &DeleteResult{Set: set, FilesWithReferences: filesWithRefs}, nil
 }
 
-// RenamePackageRequest renames a Go package.
 type RenamePackageRequest struct {
-	OldImportPath string // e.g. "example.com/proj/pkg"
-	NewImportPath string // e.g. "example.com/proj/lib"
+	OldImportPath string
+	NewImportPath string
 	Index         *golang.Index
 }
 
@@ -95,7 +87,6 @@ func PlanRenamePackage(req RenamePackageRequest) (*edit.Set, error) {
 
 	newDir := req.Index.ImportPathToDir(req.NewImportPath)
 	if newDir == "" {
-		// Compute from module root + new path.
 		rel := req.NewImportPath
 		if strings.HasPrefix(rel, req.Index.ModulePath+"/") {
 			rel = rel[len(req.Index.ModulePath)+1:]
@@ -106,7 +97,6 @@ func PlanRenamePackage(req RenamePackageRequest) (*edit.Set, error) {
 
 	set := edit.NewSet()
 
-	// 1. Rewrite package declarations + move files.
 	for _, path := range files {
 		fe := req.Index.File(path)
 		if fe == nil || fe.Symbols == nil {
@@ -122,7 +112,6 @@ func PlanRenamePackage(req RenamePackageRequest) (*edit.Set, error) {
 		set.AddMove(edit.Move{From: path, To: newPath, Why: "move to new package"})
 	}
 
-	// 2. Rewrite imports in dependents.
 	for _, path := range req.Index.FilesImporting(req.OldImportPath) {
 		fe := req.Index.File(path)
 		if fe == nil || fe.Symbols == nil {
@@ -141,8 +130,6 @@ func PlanRenamePackage(req RenamePackageRequest) (*edit.Set, error) {
 	return set, nil
 }
 
-// danglingGo reports whether path still qualifies an identifier with a package
-// name whose import is being removed.
 func danglingGo(path string, bound []string, spans []refs.Span) bool {
 	if len(bound) == 0 {
 		return false

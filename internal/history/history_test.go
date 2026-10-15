@@ -9,8 +9,6 @@ import (
 	"github.com/serfom256/refactorio/internal/edit"
 )
 
-// useTempHome redirects HOME to a temp dir for the test so we don't
-// pollute the user's real ~/.refactorio.
 func useTempHome(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
@@ -44,7 +42,6 @@ func TestFindProjectRoot_NoMarker(t *testing.T) {
 func TestSnapshotSaveRollback_PerProject(t *testing.T) {
 	useTempHome(t)
 
-	// Two distinct project roots.
 	projA := t.TempDir()
 	projB := t.TempDir()
 
@@ -57,7 +54,6 @@ func TestSnapshotSaveRollback_PerProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Modify A and save snapshot under projA.
 	setA := edit.NewSet()
 	setA.Add(edit.Edit{File: fileA, Start: 0, End: 8, NewText: "MODIFIED"})
 	csA, err := Snapshot(setA, "rename A", projA)
@@ -71,7 +67,6 @@ func TestSnapshotSaveRollback_PerProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Modify B and save under projB.
 	setB := edit.NewSet()
 	setB.Add(edit.Edit{File: fileB, Start: 0, End: 8, NewText: "MODIFIED"})
 	csB, err := Snapshot(setB, "rename B", projB)
@@ -85,7 +80,6 @@ func TestSnapshotSaveRollback_PerProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Each project has its own history: 1 entry each, not 2.
 	entriesA, _ := List(projA)
 	entriesB, _ := List(projB)
 	if len(entriesA) != 1 {
@@ -95,7 +89,6 @@ func TestSnapshotSaveRollback_PerProject(t *testing.T) {
 		t.Errorf("projB entries = %d, want 1: %v", len(entriesB), entriesB)
 	}
 
-	// Rolling back projA restores fileA but leaves fileB modified.
 	if _, err := Rollback(projA); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +101,6 @@ func TestSnapshotSaveRollback_PerProject(t *testing.T) {
 		t.Errorf("projB was wrongly affected by projA rollback: %q", gotB)
 	}
 
-	// projA history is empty now; projB still has its entry.
 	entriesA, _ = List(projA)
 	entriesB, _ = List(projB)
 	if len(entriesA) != 0 {

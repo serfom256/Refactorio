@@ -1,6 +1,3 @@
-// Package ktrename implements cross-file Kotlin symbol rename.
-// Reuses the Java project detection (gradle/maven) since Kotlin
-// lives in the same project structure.
 package ktrename
 
 import (
@@ -14,13 +11,12 @@ import (
 	"github.com/serfom256/refactorio/internal/project"
 )
 
-// KtIndex is a project-wide index of Kotlin symbols.
 type KtIndex struct {
 	files   map[string]*KtFileEntry
 	byFQN   map[string]*KtTypeDecl
-	byPkg   map[string][]string // package → files
-	impBy   map[string][]string // FQN → files importing it
-	wildImp map[string][]string // package → files with wildcard import
+	byPkg   map[string][]string
+	impBy   map[string][]string
+	wildImp map[string][]string
 }
 
 type KtFileEntry struct {
@@ -116,12 +112,10 @@ func (idx *KtIndex) buildLookups() {
 	}
 }
 
-// File returns the entry for an exact path.
 func (idx *KtIndex) File(path string) *KtFileEntry {
 	return idx.files[path]
 }
 
-// FilesInPkg returns file paths in the given package.
 func (idx *KtIndex) FilesInPkg(pkg string) []string {
 	return idx.byPkg[pkg]
 }
@@ -155,9 +149,8 @@ func max(a, b int) int {
 	return b
 }
 
-// RenameRequest renames a Kotlin symbol across the project.
 type RenameRequest struct {
-	FQN     string // e.g. "com.foo.Bar"
+	FQN     string
 	NewName string
 	Index   *KtIndex
 }
@@ -177,7 +170,6 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 
 	set := edit.NewSet()
 
-	// Rename declaration.
 	set.Add(edit.Edit{
 		File: target.File, Start: target.NameRange.Start, End: target.NameRange.End,
 		NewText: req.NewName, Why: fmt.Sprintf("rename declaration %s -> %s", oldName, req.NewName),
@@ -204,7 +196,6 @@ func planKtFile(fe *KtFileEntry, target *KtTypeDecl, newName string, set *edit.S
 	tokens := kotlin.Tokenize(src)
 	oldName := target.Name
 
-	// Rewrite import paths.
 	for _, imp := range fe.Symbols.Imports {
 		if imp.Path == target.FQN {
 			newFQN := target.Package + "." + newName
@@ -215,10 +206,6 @@ func planKtFile(fe *KtFileEntry, target *KtTypeDecl, newName string, set *edit.S
 		}
 	}
 
-	// Rename identifier occurrences with position-awareness.
-	// Only rename identifiers that are in type position (after new,
-	// extends, :, <), call position (followed by '('), or field
-	// position (after '.'). Skip local variable declarations.
 	for i, tok := range tokens {
 		if tok.Kind != kotlin.TIdent || tok.Text != oldName {
 			continue
@@ -250,21 +237,14 @@ func inImportRange(tok kotlin.Token, syms *kotlin.FileSymbols) bool {
 	return false
 }
 
-// isLocalDeclKt checks if the identifier at index i is a local
-// variable/parameter declaration rather than a reference to the symbol
-// being renamed. Pattern: `val/var <name>` or `<Type> <name>` in
-// parameter position.
 func isLocalDeclKt(tokens []kotlin.Token, i int) bool {
 	if i <= 0 {
 		return false
 	}
-	// `val name` or `var name` → local declaration.
 	prev := prevNonCommentKt(tokens, i-1)
 	if prev != nil && (prev.Text == "val" || prev.Text == "var") {
 		return true
 	}
-	// Parameter: `Type name,` or `Type name)` — preceded by an
-	// uppercase identifier (type name) and followed by , or ) or :
 	if prev != nil && prev.Kind == kotlin.TIdent && !prev.IsKeyword() && isUpperStartKt(prev.Text) {
 		next := nextNonCommentKt(tokens, i+1)
 		if next != nil && (next.Text == "," || next.Text == ")" || next.Text == ":") {

@@ -1,4 +1,3 @@
-// Package rstrename implements Rust rename, move, and delete operations.
 package rstrename
 
 import (
@@ -32,7 +31,6 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 		return nil, fmt.Errorf("file %s not indexed", req.File)
 	}
 
-	// Find the declaration.
 	var decl *rust.Declaration
 	for i := range fe.Symbols.Declarations {
 		if fe.Symbols.Declarations[i].Name == req.Symbol {
@@ -47,27 +45,22 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 	modPath := req.Index.FileToModulePath(req.File)
 	set := edit.NewSet()
 
-	// 1. Rename the declaration.
 	set.Add(edit.Edit{
 		File: req.File, Start: decl.NameRange.Start, End: decl.NameRange.End,
 		NewText: req.NewName, Why: fmt.Sprintf("rename declaration %s -> %s", req.Symbol, req.NewName),
 	})
 
-	// 2. Rename usages in the same module (same file + sibling files).
-	// This covers impl blocks, type references, and other occurrences.
 	for _, path := range req.Index.FilesInModule(modPath) {
 		if err := renameInFile(path, req.Symbol, req.NewName, decl.NameRange, set); err != nil {
 			return nil, err
 		}
 	}
 
-	// 3. Rename in files that `use` this symbol.
 	for _, path := range req.Index.FilesUsing(modPath, req.Symbol) {
 		useFE := req.Index.File(path)
 		if useFE == nil || useFE.Symbols == nil {
 			continue
 		}
-		// Rewrite use paths.
 		oldUsePath := modPath + "::" + req.Symbol
 		newUsePath := modPath + "::" + req.NewName
 		for _, u := range useFE.Symbols.Uses {
@@ -78,11 +71,10 @@ func PlanRename(req RenameRequest) (*edit.Set, error) {
 				})
 			}
 		}
-		// Rename identifier usages (the local name after `use`).
 		localName := req.Symbol
 		for _, u := range useFE.Symbols.Uses {
 			if u.Path == oldUsePath && u.Alias != "" {
-				localName = u.Alias // aliased — don't rename usages
+				localName = u.Alias
 			}
 		}
 		if localName == req.Symbol {
@@ -121,7 +113,6 @@ func PlanMove(req MoveRequest) (*edit.Set, error) {
 
 	set := edit.NewSet()
 
-	// Update `use` paths in all files that reference the old module.
 	if oldMod != newMod {
 		for _, path := range req.Index.AllFiles() {
 			fileFE := req.Index.File(path)
@@ -167,7 +158,6 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 	set := edit.NewSet()
 	var filesWithRefs []string
 
-	// Remove `use` statements referencing this module's symbols.
 	for _, path := range req.Index.AllFiles() {
 		fileFE := req.Index.File(path)
 		if fileFE == nil || fileFE.Symbols == nil || path == req.File {
@@ -187,20 +177,17 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 			spans = append(spans, refs.Span{Start: u.Range.Start, End: u.Range.End})
 			bound = append(bound, useBinding(u))
 		}
-		// Remove `mod` declarations for this module.
 		for _, md := range fileFE.Symbols.ModDecls {
 			baseName := strings.TrimSuffix(filepath.Base(req.File), ".rs")
 			if baseName == "mod" {
 				baseName = filepath.Base(filepath.Dir(req.File))
 			}
 			if md.Name == baseName {
-				// Find the full `mod name;` range to remove.
 				src, err := os.ReadFile(path)
 				if err == nil {
 					tokens := rust.Tokenize(src)
 					for i, tok := range tokens {
 						if tok.Kind == rust.TIdent && tok.Text == "mod" && i+1 < len(tokens) && tokens[i+1].Text == baseName {
-							// Find the trailing ;
 							end := tokens[i+1].End
 							for j := i + 2; j < len(tokens); j++ {
 								if tokens[j].Text == ";" {
@@ -227,8 +214,6 @@ func PlanDelete(req DeleteRequest) (*DeleteResult, error) {
 	return &DeleteResult{Set: set, FilesWithReferences: filesWithRefs}, nil
 }
 
-// useBinding returns the local name a `use` introduces: the alias when there
-// is one, otherwise the last segment of the path.
 func useBinding(u rust.UseDecl) string {
 	if u.Alias != "" {
 		return u.Alias
@@ -239,8 +224,6 @@ func useBinding(u rust.UseDecl) string {
 	return u.Path
 }
 
-// danglingRs reports whether path still uses a name the removed `use`
-// statements bound.
 func danglingRs(path string, bound, stillBound []string, spans []refs.Span) bool {
 	if len(bound) == 0 {
 		return false
@@ -273,11 +256,9 @@ func renameInFile(path, oldName, newName string, skipRange rust.Range, set *edit
 		if tok.Start == skipRange.Start && tok.End == skipRange.End {
 			continue
 		}
-		// Skip tokens inside use declarations.
 		if syms != nil && inUseRange(tok, syms) {
 			continue
 		}
-		// Skip local variable declarations: `let name`, `let mut name`.
 		if isLocalDeclRs(tokens, i) {
 			continue
 		}
@@ -306,7 +287,6 @@ func isLocalDeclRs(tokens []rust.Token, i int) bool {
 	if prev == nil {
 		return false
 	}
-	// `let name` or `let mut name`
 	if prev.Text == "let" || prev.Text == "mut" {
 		return true
 	}

@@ -1,10 +1,3 @@
-// Package usages reports where a symbol is declared and referenced
-// across the project. Read-only — no edits are written.
-//
-// Implementation: we ask the rename layer "what would you edit if I
-// renamed this symbol?", then convert each edit into a finding. This
-// guarantees the usages report and a subsequent rename touch exactly
-// the same locations.
 package usages
 
 import (
@@ -20,16 +13,14 @@ import (
 
 const probeName = "RefactorioUsageProbe"
 
-// Category classifies a finding.
 type Category string
 
 const (
 	CatDeclaration Category = "declaration"
 	CatUsage       Category = "usage"
-	CatOverload    Category = "overload" // additional declaration (e.g. method overload)
+	CatOverload    Category = "overload"
 )
 
-// Finding is one location where the symbol appears.
 type Finding struct {
 	File     string   `json:"file"`
 	Line     int      `json:"line"`
@@ -38,19 +29,14 @@ type Finding struct {
 	Text     string   `json:"text"`
 }
 
-// Result is the full report for a symbol.
 type Result struct {
 	Symbol   string    `json:"symbol"`
 	Total    int       `json:"total"`
 	Findings []Finding `json:"findings"`
 }
 
-// RenameFn is the rename dispatcher we ask "what would you change?".
-// Callers (the CLI layer) wire this to unified.Rename to avoid a
-// circular import.
 type RenameFn func(inFile, name, newName, root string) (*edit.Set, error)
 
-// Find runs the rename probe and converts edits to findings.
 func Find(inFile, symbol, root string, rename RenameFn) (*Result, error) {
 	set, err := rename(inFile, symbol, probeName, root)
 	if err != nil {
@@ -58,11 +44,9 @@ func Find(inFile, symbol, root string, rename RenameFn) (*Result, error) {
 	}
 	res := &Result{Symbol: symbol}
 
-	// Cache file contents so we can compute line text and column once
-	// per file.
 	type fileCtx struct {
 		src   []byte
-		lines []int // byte offset at the start of each line (1-based via index+1)
+		lines []int
 	}
 	cache := map[string]*fileCtx{}
 	loadCtx := func(path string) *fileCtx {
@@ -84,8 +68,6 @@ func Find(inFile, symbol, root string, rename RenameFn) (*Result, error) {
 	}
 
 	for _, e := range set.Edits() {
-		// Skip non-identifier edits: import rewrites, package decl
-		// updates, file renames, etc.
 		if !isIdentifierEdit(e.Why) {
 			continue
 		}
@@ -113,11 +95,6 @@ func Find(inFile, symbol, root string, rename RenameFn) (*Result, error) {
 	return res, nil
 }
 
-// orderFindings groups by category:
-//
-//  1. Primary declaration (first one seen)
-//  2. Usages, sorted by file then line
-//  3. Additional declarations (overloads, etc.) at the bottom
 func orderFindings(fs []Finding) []Finding {
 	var primary *Finding
 	var usages, overloads []Finding
@@ -161,7 +138,6 @@ func orderFindings(fs []Finding) []Finding {
 }
 
 func isIdentifierEdit(why string) bool {
-	// Filter out edits that aren't on the identifier itself.
 	if strings.HasPrefix(why, "update import") ||
 		strings.HasPrefix(why, "update use") ||
 		strings.HasPrefix(why, "update static import") ||
@@ -209,15 +185,11 @@ func lineAt(src []byte, lineStarts []int, line int) string {
 	return string(src[start:end])
 }
 
-// FormatText writes a human-readable report to w.
 func FormatText(w io.Writer, r *Result) error {
 	if len(r.Findings) == 0 {
 		_, err := fmt.Fprintf(w, "no usages of %q found\n", r.Symbol)
 		return err
 	}
-	// Locations are shown relative to the working directory, and the column
-	// is padded only to the widest of those — padding to absolute paths cost
-	// far more than it bought in readability.
 	cwd, _ := os.Getwd()
 	locs := make([]string, len(r.Findings))
 	maxLoc := 0
@@ -228,8 +200,6 @@ func FormatText(w io.Writer, r *Result) error {
 		}
 	}
 	for i, f := range r.Findings {
-		// The category tag trails the source line, so plain usages — the
-		// overwhelming majority — pay nothing for the column.
 		line := strings.TrimSpace(f.Text)
 		if f.Category != CatUsage {
 			line = fmt.Sprintf("%s  (%s)", line, f.Category)
@@ -247,7 +217,6 @@ func FormatText(w io.Writer, r *Result) error {
 	return err
 }
 
-// FormatJSON writes the result as JSON to w.
 func FormatJSON(w io.Writer, r *Result) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

@@ -8,8 +8,6 @@ import (
 	"github.com/serfom256/refactorio/internal/lang/common"
 )
 
-// FileSymbols is the per-file structural data for TS/JS: imports,
-// exports, and top-level declarations.
 type FileSymbols struct {
 	Imports      []ImportDecl
 	Exports      []ExportDecl
@@ -18,30 +16,20 @@ type FileSymbols struct {
 
 type Range = common.Range
 
-// ImportDecl is one import statement.
 type ImportDecl struct {
-	// Names are the imported bindings: `import { Foo, Bar as B } from '...'`
-	// yields [{Name:"Foo"}, {Name:"Bar", Alias:"B"}].
-	// For `import * as X`, Names is [{Name:"*", Alias:"X"}].
-	// For `import Foo`, Names is [{Name:"default", Alias:"Foo"}].
-	Names []ImportName
-	// Path is the module specifier: './foo', '@scope/pkg', etc.
-	Path string
-	// Range covers the full import statement.
-	Range Range
-	// PathRange covers just the path string (inside quotes).
-	PathRange Range
-	// IsTypeOnly is true for `import type { ... }`.
+	Names      []ImportName
+	Path       string
+	Range      Range
+	PathRange  Range
 	IsTypeOnly bool
 }
 
 type ImportName struct {
-	Name  string // original name or "default" or "*"
-	Alias string // local binding name (empty if same as Name)
-	Range Range  // range of the local binding in source
+	Name  string
+	Alias string
+	Range Range
 }
 
-// LocalName returns the name used in code (alias if set, else name).
 func (n ImportName) LocalName() string {
 	if n.Alias != "" {
 		return n.Alias
@@ -49,33 +37,27 @@ func (n ImportName) LocalName() string {
 	return n.Name
 }
 
-// ExportDecl tracks exports for reference resolution.
 type ExportDecl struct {
-	Names []ExportName
-	// From is non-empty for re-exports: `export { Foo } from './bar'`.
+	Names     []ExportName
 	From      string
 	FromRange Range
 	Range     Range
 }
 
 type ExportName struct {
-	Name  string // local name being exported
-	Alias string // exported-as name (empty if same)
+	Name  string
+	Alias string
 	Range Range
 }
 
-// Declaration is a top-level class, function, interface, type alias,
-// enum, or const/let/var binding.
 type Declaration struct {
 	Name      string
-	Kind      string // "class" | "function" | "interface" | "type" | "enum" | "const" | "let" | "var"
+	Kind      string
 	NameRange Range
 	IsExport  bool
 	IsDefault bool
 }
 
-// ExtractSymbols parses a TS/JS file using the lexer and returns
-// its structural view.
 func ExtractSymbols(src []byte) (*FileSymbols, error) {
 	tokens := Tokenize(src)
 	p := &tsParser{tokens: tokens, src: src}
@@ -130,14 +112,12 @@ func (p *tsParser) parse() *FileSymbols {
 			}
 			tok = p.at()
 
-			// Re-export: `export { ... } from '...'` or `export * from '...'`
 			if tok.Text == "{" || tok.Text == "*" {
 				if exp, ok := p.parseExportBraces(); ok {
 					fs.Exports = append(fs.Exports, exp)
 				}
 				continue
 			}
-			// `export default ...`
 			if tok.Text == "default" {
 				p.skip()
 				p.skipComments()
@@ -151,13 +131,11 @@ func (p *tsParser) parse() *FileSymbols {
 					}
 					continue
 				}
-				// `export default <expr>` — anonymous default export
 				p.skipToSemiOrNewline()
 				continue
 			}
-			// `export type { ... }` — type-only re-export
 			if tok.Text == "type" && p.peekText(1) == "{" {
-				p.skip() // skip "type"
+				p.skip()
 				if exp, ok := p.parseExportBraces(); ok {
 					fs.Exports = append(fs.Exports, exp)
 				}
@@ -186,16 +164,9 @@ func isDeclarationKeyword(s string) bool {
 	return false
 }
 
-// parseImport handles all import forms:
-//
-//	import { Foo, Bar as B } from './path'
-//	import * as X from './path'
-//	import Foo from './path'
-//	import './path'  (side-effect)
-//	import type { Foo } from './path'
 func (p *tsParser) parseImport() (ImportDecl, bool) {
 	imp := ImportDecl{Range: Range{Start: p.at().Start, Line: p.at().Line}}
-	p.skip() // "import"
+	p.skip()
 	p.skipComments()
 
 	if p.text() == "type" && p.peekText(1) != "(" {
@@ -204,7 +175,6 @@ func (p *tsParser) parseImport() (ImportDecl, bool) {
 		p.skipComments()
 	}
 
-	// Side-effect import: `import './path'`
 	if p.at().Kind == TString {
 		imp.Path, imp.PathRange = p.extractStringPath()
 		imp.Range.End = p.at().Start
@@ -212,7 +182,6 @@ func (p *tsParser) parseImport() (ImportDecl, bool) {
 		return imp, imp.Path != ""
 	}
 
-	// `import * as X from '...'`
 	if p.text() == "*" {
 		p.skip()
 		p.skipComments()
@@ -233,7 +202,6 @@ func (p *tsParser) parseImport() (ImportDecl, bool) {
 		return imp, imp.Path != ""
 	}
 
-	// `import { Foo, Bar as B } from '...'`
 	if p.text() == "{" {
 		imp.Names = p.parseNamedBindings()
 		imp.Path, imp.PathRange = p.consumeFromClause()
@@ -242,8 +210,6 @@ func (p *tsParser) parseImport() (ImportDecl, bool) {
 		return imp, imp.Path != ""
 	}
 
-	// `import Foo from '...'` — default import
-	// Could also be `import Foo, { Bar } from '...'`
 	if p.at().Kind == TIdent && !p.at().IsKeyword() {
 		imp.Names = append(imp.Names, ImportName{
 			Name: "default", Alias: p.text(),
@@ -272,14 +238,13 @@ func (p *tsParser) parseNamedBindings() []ImportName {
 	if p.text() != "{" {
 		return nil
 	}
-	p.skip() // {
+	p.skip()
 	var names []ImportName
 	for p.pos < len(p.tokens) && p.text() != "}" {
 		p.skipComments()
 		if p.text() == "}" || p.pos >= len(p.tokens) {
 			break
 		}
-		// Skip `type` prefix in `import { type Foo } from '...'`
 		if p.text() == "type" && p.peekText(1) != "}" && p.peekText(1) != "," {
 			p.skip()
 			p.skipComments()
@@ -344,7 +309,6 @@ func (p *tsParser) parseExportBraces() (ExportDecl, bool) {
 	if p.text() == "*" {
 		p.skip()
 		p.skipComments()
-		// `export * from '...'` or `export * as X from '...'`
 		if p.text() == "as" {
 			p.skip()
 			p.skipComments()
@@ -404,12 +368,9 @@ func (p *tsParser) parseExportBraces() (ExportDecl, bool) {
 	return ExportDecl{}, false
 }
 
-// parseDeclaration handles class, function, interface, type, enum,
-// const/let/var declarations.
 func (p *tsParser) parseDeclaration(isExport, isDefault bool) (Declaration, bool) {
 	d := Declaration{IsExport: isExport, IsDefault: isDefault}
 
-	// Skip prefixes: abstract, async, declare
 	for p.at().Kind == TIdent && isModifier(p.text()) {
 		p.skip()
 		p.skipComments()
@@ -426,7 +387,6 @@ func (p *tsParser) parseDeclaration(isExport, isDefault bool) (Declaration, bool
 			d.NameRange = Range{Start: p.at().Start, End: p.at().End, Line: p.at().Line}
 			p.skip()
 		}
-		// Skip to end of declaration body.
 		p.skipToMatchingBrace()
 		return d, d.Name != ""
 
@@ -434,7 +394,6 @@ func (p *tsParser) parseDeclaration(isExport, isDefault bool) (Declaration, bool
 		d.Kind = "function"
 		p.skip()
 		p.skipComments()
-		// Generator: function*
 		if p.text() == "*" {
 			p.skip()
 			p.skipComments()
@@ -485,7 +444,6 @@ func isModifier(s string) bool {
 }
 
 func (p *tsParser) skipToMatchingBrace() {
-	// Skip until {, then balance braces.
 	for p.pos < len(p.tokens) && p.text() != "{" {
 		p.skip()
 	}
@@ -514,8 +472,6 @@ func (p *tsParser) skipToSemiOrNewline() {
 			p.skip()
 			return
 		}
-		// For TS, newline after expression is a valid statement terminator
-		// (ASI). Approximate by stopping at next top-level keyword.
 		if p.at().Kind == TIdent && isTopLevelBoundary(p.text()) {
 			return
 		}
@@ -544,7 +500,6 @@ func (p *tsParser) peekText(offset int) string {
 	return p.tokens[idx].Text
 }
 
-// IsValidIdentifier checks whether s is a valid JS/TS identifier.
 func IsValidIdentifier(s string) bool {
 	if s == "" {
 		return false
@@ -566,7 +521,7 @@ func IsValidIdentifier(s string) bool {
 		case "undefined", "from", "of", "as", "get", "set",
 			"type", "declare", "module", "namespace", "abstract",
 			"async", "readonly", "is", "keyof", "require":
-			return true // contextual keywords, valid as identifiers
+			return true
 		default:
 			return false
 		}
@@ -574,16 +529,13 @@ func IsValidIdentifier(s string) bool {
 	return true
 }
 
-// ResolveImportPath resolves a relative import path to an absolute
-// file path. Handles extensionless imports by trying common suffixes.
 func ResolveImportPath(importPath, fromFile string) string {
 	if !strings.HasPrefix(importPath, ".") {
-		return "" // node_modules / bare specifier — not resolved
+		return ""
 	}
 	dir := filepath.Dir(fromFile)
 	resolved := filepath.Join(dir, importPath)
 
-	// Try exact path first, then with common extensions.
 	for _, ext := range []string{"", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.tsx", "/index.js"} {
 		candidate := resolved + ext
 		if fileExists(candidate) {

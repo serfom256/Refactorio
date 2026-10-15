@@ -64,7 +64,6 @@ func Plan(req Request) (*edit.Set, error) {
 		}
 	}
 
-	// Rewrite static imports.
 	for _, path := range req.Index.FilesImporting(target.FQN) {
 		fe := req.Index.File(path)
 		if fe == nil || fe.Symbols == nil {
@@ -107,33 +106,22 @@ func planFile(
 		targetBody = &bodyRange{Start: target.BodyRange.Start, End: target.BodyRange.End}
 	}
 
-	// Scan for method call patterns — <receiver>.<name>( or bare <name>( —
-	// and method references, <receiver>::<name>. A method reference has
-	// neither the dot nor the parenthesis, so it needs its own test; missing
-	// it left `builder::build`, `this::build` and `Builder::make` pointing at
-	// a method that no longer existed.
 	for i, tok := range tokens {
 		if tok.Kind != java.TIdent || tok.Text != oldName {
 			continue
 		}
-		// Skip declaration edits (already emitted from target.Methods).
 		if fe.Path == target.File && isDeclRange(tok, target) {
 			continue
 		}
 		prev := prevNonComment(tokens, i-1)
-		// The lexer emits "::" as an operator token, so match on text alone.
 		isRef := prev != nil && prev.Text == "::"
 		if !isRef {
-			// A call must be followed by '('.
 			next := nextNonComment(tokens, i+1)
 			if next == nil || next.Text != "(" {
 				continue
 			}
 		}
 		if isRef || (prev != nil && prev.Text == ".") {
-			// obj.method( / Class.method( / this.method(, or the reference
-			// forms obj::method / Class::method / this::method. The receiver
-			// is classified identically either way.
 			receiver := prevNonComment(tokens, indexOfToken(tokens, prev)-1)
 			if receiver == nil {
 				continue
@@ -151,7 +139,6 @@ func planFile(
 				NewText: newName, Why: fmt.Sprintf("rename %s %s.%s -> %s [%s]", kind, target.Name, oldName, newName, conf),
 			})
 		} else {
-			// Bare call: method(
 			if targetBody != nil && targetBody.contains(tok.Start) {
 				set.Add(edit.Edit{
 					File: fe.Path, Start: tok.Start, End: tok.End,
@@ -213,7 +200,6 @@ func classifyReceiver(receiver *java.Token, target *index.TypeDecl, varTypes map
 	return "", false
 }
 
-// scanVarTypes builds a name→type map from variable declarations.
 func scanVarTypes(tokens []java.Token) map[string]string {
 	out := map[string]string{}
 	for i := 0; i < len(tokens); i++ {
@@ -221,9 +207,6 @@ func scanVarTypes(tokens []java.Token) map[string]string {
 		if tok.Kind != java.TIdent || tok.IsKeyword() {
 			continue
 		}
-		// Pattern: <TypeIdent> <name> [= | ; | , | )]
-		// TypeIdent must be PascalCase (start with uppercase) for us to
-		// consider it a type — avoids treating `int x` where int is keyword.
 		if !isUpperStart(tok.Text) {
 			continue
 		}
@@ -320,4 +303,4 @@ func endsWithDotName(path, name string) bool {
 		path[len(path)-len(name):] == name
 }
 
-var _ = strings.HasPrefix // keep strings imported for endsWithDotName
+var _ = strings.HasPrefix

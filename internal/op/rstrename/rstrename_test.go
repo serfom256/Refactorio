@@ -185,8 +185,6 @@ func TestDelete_RemovesFileAndUseStatements(t *testing.T) {
 	}
 }
 
-// A file whose `use` of the deleted module is removed, and which never used
-// the binding, needs no manual cleanup.
 func TestPlanDelete_DeadUseOnlyIsNotReported(t *testing.T) {
 	idx, root := mk(t, map[string]string{
 		"Cargo.toml":  "[package]\nname = \"myproj\"\n",
@@ -208,7 +206,6 @@ func TestPlanDelete_DeadUseOnlyIsNotReported(t *testing.T) {
 	}
 }
 
-// `use crate::foo::greet as g` leaves g dangling, not greet.
 func TestPlanDelete_TracksAliasedUse(t *testing.T) {
 	idx, root := mk(t, map[string]string{
 		"Cargo.toml":  "[package]\nname = \"myproj\"\n",
